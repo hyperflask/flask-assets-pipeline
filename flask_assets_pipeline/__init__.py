@@ -17,7 +17,7 @@ from .utils import copy_files, copy_assets
 @dataclass
 class AssetsPipelineState:
     bundles: t.Sequence[str] | t.Mapping[str, t.Sequence[str]]
-    include: t.Sequence[str]
+    include: t.Sequence[t.Tuple[int, str]]
     route_template: str
     inline: bool
     include_inline_on_demand: bool
@@ -324,40 +324,46 @@ class AssetsPipeline:
         return mapping.get(filename, [filename])
 
     def url(self, filename, with_meta=False, single=True, external=False):
-        r = re.compile("(import|prefetch|modulepreload|preload( as [a-z]+)?) ")
+        r = re.compile("(static|import|prefetch|modulepreload|preload( as [a-z]+)?) ")
+        meta = {}
+        if isinstance(filename, (tuple, list)):
+            filename, meta = filename
+            if not isinstance(meta, dict):
+                meta = {"modifier": meta}
+        else:
+            m = r.match(filename)
+            if m:
+                meta["modifier"] = m.group(1)
+                filename = filename[m.end() :]
+                if meta["modifier"].startswith("preload as "):
+                    meta["modifier"], meta["content_type"] = meta["modifier"].split(" as ", 1)
+                elif meta["modifier"] == "preload":
+                    meta["content_type"] = PRELOAD_AS_EXT_MAPPING.get(
+                        filename.split(".")[-1], "fetch"
+                    )
+        if "#" in filename:
+            filename, fragment = filename.split("#", 1)
+            meta.update(urllib.parse.parse_qs(fragment))
+
         urls = {}
         for url in self.resolve_asset_filename_to_url(filename):
+            url_meta = dict(meta)
             if isinstance(url, (tuple, list)):
-                url, meta = url
-                if not isinstance(meta, dict):
-                    meta = {"modifier": meta}
-            else:
-                m = r.match(url)
-                meta = {}
-                if m:
-                    meta["modifier"] = m.group(1)
-                    url = url[m.end() :]
-                    if meta["modifier"].startswith("preload as "):
-                        meta["modifier"], meta["content_type"] = meta["modifier"].split(" as ", 1)
-                    elif meta["modifier"] == "preload":
-                        meta["content_type"] = PRELOAD_AS_EXT_MAPPING.get(
-                            url.split(".")[-1], "fetch"
-                        )
-            if "#" in url:
-                url, fragment = url.split("#", 1)
-                meta.update(urllib.parse.parse_qs(fragment))
+                url, _meta = url
+                url_meta.update(_meta)
             if is_abs_url(url):
-                meta.setdefault("crossorigin", "anonymous")
+                url_meta.setdefault("crossorigin", "anonymous")
             else:
                 if not url.startswith("/"):
                     url = url_for(
-                        self.state.assets_endpoint,
+                        'static' if url_meta.get("modifier") == "static" else self.state.assets_endpoint,
                         filename=url,
                         _external=external if not self.state.cdn_enabled else False,
                     )
                 if self.state.cdn_enabled:
                     url = self.state.cdn_host + url
-            urls[url] = meta
+            urls[url] = url_meta
+            
         urls = list(urls.keys()) if not with_meta else urls.items()
         return urls[0] if single else urls
 
@@ -638,7 +644,7 @@ class AssetsPipeline:
             )
 
     def copy_files_from_node_modules(self, files):
-        copy_files(files, self.state.node_modules_path, self.state.assets_folder, self.app.logger)
+        copy_files(files, self.state.node_modules_path, self.app.static_folder, self.app.logger)
 
 
 def is_abs_url(path):
