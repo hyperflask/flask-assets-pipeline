@@ -103,7 +103,7 @@ class InlineAssetExtension(Extension):
                 out.append(Token(lineno, "data", preval))
                 lineno += count_newlines(preval)
 
-            end_match = self.close_tag_re.search(token.value)
+            end_match = self.close_tag_re.search(token.value[open_match.end():])
             if not end_match:
                 raise TemplateSyntaxError(
                     f"unclosed {self.tags[0]} tag",
@@ -112,7 +112,7 @@ class InlineAssetExtension(Extension):
                     stream.filename,
                 )
 
-            content = token.value[open_match.end() : end_match.start()]
+            content = token.value[open_match.end() : open_match.end() + end_match.start()]
             block_end_lineno = lineno + count_newlines(content)
             out.extend(
                 [
@@ -128,8 +128,8 @@ class InlineAssetExtension(Extension):
                 ]
             )
 
-            if end_match.end() < len(token.value):
-                out.append(Token(block_end_lineno, "data", token.value[end_match.end() :]))
+            if open_match.end() + end_match.end() < len(token.value):
+                out.append(Token(block_end_lineno, "data", token.value[open_match.end() + end_match.end() :]))
 
         return out
 
@@ -142,6 +142,8 @@ class InlineAssetExtension(Extension):
         state = self.environment.app.extensions["assets"]
         if bundle and bundle in state.bundles:
             state.bundles[bundle].append(filename)
+        elif bundle and bundle.startswith("@"):
+            state.instance.bundle([filename], bundle, include=not state.include_inline_on_demand)
         else:
             bundle = filename = bundle or filename
             state.instance.bundle([filename], include=not state.include_inline_on_demand)

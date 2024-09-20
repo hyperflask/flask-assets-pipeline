@@ -29,7 +29,8 @@ class TemplateCompilerHandler(FileSystemEventHandler):
             try:
                 with self.app.app_context():
                     try:
-                        self.app.jinja_env.get_template(tpl)
+                        source = self.app.jinja_env.loader.get_source(self.app.jinja_env, tpl)[0]
+                        self.app.jinja_env.compile(source, tpl) # force the compilation so the extension parse() method is executed
                     except TemplateNotFound:
                         # handle loaders that do weird stuff :)
                         for template in self.app.jinja_loader.list_templates():
