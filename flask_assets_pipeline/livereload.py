@@ -1,4 +1,5 @@
 from flask import Flask
+from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from werkzeug.serving import run_simple
 import queue
@@ -31,9 +32,15 @@ class ReloadHandler(FileSystemEventHandler):
             self.broker.ping()
 
 
-class Broker:
-    def __init__(self):
+class Reloader:
+    def __init__(self, observer=None):
+        if not observer:
+            observer = Observer()
+        self.observer = observer
         self.subscribers = []
+
+    def observe(self, path, filter=None, recursive=True):
+        self.observer.schedule(ReloadHandler(self, filter), path, recursive=recursive)
 
     def subscribe(self):
         q = queue.Queue(maxsize=5)
@@ -51,13 +58,13 @@ class Broker:
                 del subscribers[i]
 
 
-def create_reloader_app(broker):
+def create_reloader_app(reloader):
     app = Flask(__name__)
 
     @app.route("/")
     def index():
         def stream():
-            sub = broker.subscribe()
+            sub = reloader.subscribe()
             while True:
                 yield sub.get()
 
@@ -66,11 +73,11 @@ def create_reloader_app(broker):
     return app
 
 
-def start_reloader_app(broker, port):
+def start_reloader_app(reloader, port):
     os.environ["FLASK_RUN_FROM_CLI"] = "false"
     logger = logging.getLogger("werkzeug")
     for handler in logger.handlers:
         logger.removeHandler(handler)
     logger.addHandler(logging.NullHandler())
-    app = create_reloader_app(broker)
+    app = create_reloader_app(reloader)
     run_simple("127.0.0.1", int(port), app, threaded=True)

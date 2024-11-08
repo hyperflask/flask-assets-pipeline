@@ -4,14 +4,18 @@ from dataclasses import dataclass
 import typing as t
 import os
 import json
-import subprocess
 import re
 import urllib.parse
-import shutil
+import importlib
 from .cli import assets_cli
 from .jinja import configure_environment
 from .livereload import LIVERELOAD_SCRIPT
-from .utils import copy_files, copy_assets
+from .utils import copy_assets, is_abs_url
+from .builder import BuilderBase
+from .builders.node_deps import NodeDependenciesBuilder
+from .builders.templates import TemplateBuilder
+from .builders.esbuild import EsbuildBuilder
+from .builders.tailwind import TailwindBuilder
 
 
 @dataclass
@@ -49,6 +53,7 @@ class AssetsPipelineState:
     cdn_enabled: bool
     mapping: t.Mapping[str, t.Sequence[str]]
     watch_template_folders: t.Sequence[str]
+    builders: t.Sequence[t.Type[BuilderBase]]
     instance: "AssetsPipeline"
 
 
@@ -172,6 +177,7 @@ class AssetsPipeline:
             cdn_enabled=not app.debug if cdn_enabled is None else cdn_enabled,
             mapping={},
             watch_template_folders=[],
+            builders=[],
             instance=self,
         )  # fmt: skip
         app.extensions["assets"] = state
@@ -228,13 +234,7 @@ class AssetsPipeline:
         )
 
         app.cli.add_command(assets_cli)
-
-    def read_mapping(self):
-        try:
-            with open(self.state.mapping_file, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+        self.builders = []
 
     def bundle(self, assets, name=None, include=False, priority=1, assets_folder=None, output_folder=None):
         bundles = {}
@@ -369,7 +369,7 @@ class AssetsPipeline:
 
     def urls(self, paths=None, with_meta=False):
         if paths is None:
-            includes = g.include_assets if has_request_context() else self.state.include
+            includes = g.include_assets if has_request_context() and 'include_assets' in g else self.state.include
             paths = [i[1] for i in sorted(includes, key=lambda i: i[0], reverse=True)]
         elif isinstance(paths, str):
             paths = [paths]
@@ -378,7 +378,7 @@ class AssetsPipeline:
             urls.update(dict(self.url(f, with_meta=True, single=False)))
         return urls.items() if with_meta else list(urls.keys())
 
-    def tags(self):
+    def tags(self, paths=None):
         tags = []
         pre = []
         if self.state.import_map:
@@ -386,7 +386,7 @@ class AssetsPipeline:
                 '<script type="importmap">%s</script>'
                 % json.dumps({"imports": self.state.import_map})
             )
-        for url, meta in self.urls(with_meta=True):
+        for url, meta in self.urls(paths, with_meta=True):
             attrs = "".join(
                 f' {k}="{v}"'
                 for k, v in meta.items()
@@ -410,14 +410,16 @@ class AssetsPipeline:
             tags.append(LIVERELOAD_SCRIPT % {"livereload_port": self.state.livereload_port})
         return Markup("\n".join(pre + tags))
 
-    def add_route(self, endpoint, url, decorators=None, **options):
-        def view_func():
-            return render_template(self.state.route_template)
-
+    def add_route(self, endpoint, url, decorators=None, template=None, app=None, **options):
+        app = app or self.app
+        def view_func(*args, **kwargs):
+            return render_template(template or self.state.route_template)
         if decorators:
             for decorator in decorators:
                 view_func = decorator(view_func)
-        self.app.add_url_rule(url, endpoint=endpoint, view_func=view_func, **options)
+        urls = url if isinstance(url, (list, tuple)) else [url]
+        for url in urls:
+            app.add_url_rule(url, endpoint, view_func, **options)
 
     def map_import(self, name, url):
         self.state.import_map[name] = url
@@ -428,16 +430,26 @@ class AssetsPipeline:
                 if isinstance(file, (tuple, list)) and file[1].get("map_as"):
                     self.map_import(file[1]["map_as"], file[0])
 
-    def extract_from_templates(self, env=None, loader=None, write=True):
-        if not env:
-            env = self.app.jinja_env
-        if not loader:
-            loader = env.loader
-        with self.app.app_context():
-            env.write_inline_assets = write
-            for template in loader.list_templates():
-                source = loader.get_source(env, template)[0]
-                env.compile(source, template) # force the compilation so the extension parse() method is executed
+    def map_exposed_node_packages(self):
+        for name in self.state.expose_node_packages:
+            if ":" in name:
+                name, _ = name.split(":", 1)
+            self.map_import(name, f"{self.state.output_url}/vendor/{name}.js")
+
+    def read_mapping(self):
+        try:
+            with open(self.state.mapping_file, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def write_mapping_file(self, mapping, out=None, merge=False):
+        if not out:
+            out = self.state.mapping_file
+        with open(out, "rw" if merge else "w") as f:
+            if merge:
+                mapping = dict(json.load(f), **mapping)
+            json.dump(mapping, f, indent=2)
 
     def copy_assets_to_static(self, src=None, dest=None, stamp=None, ignore_files=None):
         if src is None:
@@ -454,198 +466,43 @@ class AssetsPipeline:
             ignore_files.append(self.state.tailwind)
 
         return copy_assets(src, dest, stamp, ignore_files, self.app.logger)
-
-    def get_esbuild_command(self, watch=False, dev=False, metafile=None):
-        inputs = []
-        entrypoints = []
-        for entrypoint, outfile in self.bundle_files():
-            if is_abs_url(entrypoint):
-                continue
-            if not os.path.isabs(entrypoint):
-                entrypoint = os.path.join(self.state.assets_folder, entrypoint)
-            inputs.append(entrypoint)
-            if outfile:
-                entrypoint = f"{outfile}={entrypoint}"
-            entrypoints.append(entrypoint)
-
-        if self.state.esbuild_script:
-            cmd = self.make_esbuild_script_command()
-            cmd.extend(self.state.esbuild_args)
-        else:
-            args = list(entrypoints)
-            args.extend(
-                [
-                    "--bundle",
-                    "--format=esm",
-                    "--asset-names=[dir]/[name]-[hash]",
-                    "--chunk-names=[dir]/[name]-[hash]",
-                    "--entry-names=[dir]/[name]-[hash]",
-                    f"--outbase={self.state.assets_folder}",
-                    f"--outdir={self.state.output_folder}",
-                ]
-            )
-            args.extend([f"--alias:{o}={n}" for o, n in self.state.esbuild_aliases.items()])
-            args.extend([f"--external:{e}" for e in self.state.esbuild_external])
-            if self.state.esbuild_splitting:
-                args.append("--splitting")
-            if self.state.esbuild_target:
-                args.append(f"--target={','.join(self.state.esbuild_target)}")
-            if metafile:
-                args.append(f"--metafile={metafile}")
-            if dev:
-                args.append("--sourcemap")
-            else:
-                args.append("--minify")
-            if watch:
-                args.append("--watch")
-            args.extend(self.state.esbuild_args)
-            cmd = self.make_esbuild_command(args)
-
-        env = {
-            "NODE_PATH": self.state.node_modules_path,
-            "ESBUILD_DEV": "1" if dev else "0",
-            "ESBUILD_WATCH": "1" if watch else "0",
-            "ESBUILD_INPUTS": ";".join(inputs),
-            "ESBUILD_ENTRYPOINTS": ";".join(entrypoints),
-            "ESBUILD_OUTBASE": self.state.assets_folder,
-            "ESBUILD_OUTDIR": self.state.output_folder,
-            "ESBUILD_METAFILE": metafile or "",
-            "ESBUILD_SPLITTING": "1" if self.state.esbuild_splitting else "0",
-            "ESBUILD_TARGET": ",".join(self.state.esbuild_target or []),
-            "ESBUILD_ALIASES": ";".join(
-                [f"{k}={v}" for k, v in self.state.esbuild_aliases.items()]
-            ),
-            "ESBUILD_EXTERNAL": ";".join(self.state.esbuild_external),
-        }
-
-        return cmd, env
-
-    def make_esbuild_script_command(self, script_filename=None):
-        if not script_filename:
-            script_filename = self.state.esbuild_script
-        if not isinstance(script_filename, list):
-            return ["node", script_filename]
-        return script_filename
-
-    def make_esbuild_command(self, args):
-        return (
-            self.state.esbuild_bin + args
-            if isinstance(self.state.esbuild_bin, list)
-            else [self.state.esbuild_bin, *args]
-        )
-
-    def convert_esbuild_metafile(self, filename=None):
-        if not filename:
-            filename = self.state.esbuild_metafile
-        inputrel = os.path.relpath(self.state.assets_folder) + "/"
-        outputrel = os.path.relpath(self.state.output_folder)
-
-        with open(filename) as f:
-            meta = json.load(f)
-
-        inputs = []
-        for input, info in meta["inputs"].items():
-            inputs.append(
-                input[len(inputrel) :] if input.startswith(inputrel) else os.path.abspath(input)
-            )
-
-        mapping = {}
-        for output, info in meta["outputs"].items():
-            if "entryPoint" not in info:
-                continue
-            o = mapping.setdefault(
-                info["entryPoint"][len(inputrel) :]
-                if info["entryPoint"].startswith(inputrel)
-                else os.path.abspath(info["entryPoint"]),
-                [],
-            )
-            url = self.state.output_url + output[len(outputrel) :]
-            if url.endswith(".js"):
-                url = [url, {"modifier": "import"}]
-            o.append(url)
-            if "cssBundle" in info:
-                o.append(self.state.output_url + info["cssBundle"][len(outputrel) :])
-            for import_info in info["imports"]:
-                if import_info["kind"] == "import-statement":
-                    o.append(
-                        [
-                            self.state.output_url + import_info["path"][len(outputrel) :],
-                            {"modifier": "modulepreload"},
-                        ]
-                    )
-
-        return inputs, mapping
-
-    def get_tailwind_command(self, watch=False, dev=False):
-        input = os.path.join(self.state.assets_folder, self.state.tailwind)
-        output = os.path.join(self.state.output_folder, self.state.tailwind)
-        args = ["-i", input, "-o", output]
-        if not dev:
-            args.append("--minify")
-        if watch:
-            args.append("--watch")
-        args.extend(self.state.tailwind_args)
-        cmd = (
-            self.state.tailwind_bin + args
-            if isinstance(self.state.tailwind_bin, list)
-            else [self.state.tailwind_bin, *args]
-        )
-
-        content = [
-            os.path.relpath(os.path.join(self.app.root_path, self.app.template_folder))
-            + "/**/*.html",
-            os.path.relpath(self.app.static_folder) + "/**/*.js",
+    
+    def load_builders(self):
+        if self.builders:
+            return self.builders
+        builtins = [
+            NodeDependenciesBuilder(),
+            TemplateBuilder(),
+            EsbuildBuilder(),
+            TailwindBuilder(),
         ]
-        content.extend(self.state.tailwind_suggested_content)
-        env = {"TAILWIND_CONTENT": ";".join(content), "TAILWIND_INPUT": input, "TAILWIND_OUTPUT": output}
-
-        return cmd, env
-
-    def check_tailwind_config(self):
-        if not os.path.exists("tailwind.config.js"):
-            shutil.copyfile(
-                os.path.join(os.path.dirname(__file__), "tailwind.config.js"), "tailwind.config.js"
-            )
-        if not os.path.exists(os.path.join(self.state.assets_folder, self.state.tailwind)):
-            with open(os.path.join(self.state.assets_folder, self.state.tailwind), "w") as f:
-                f.write("@tailwind base;\n@tailwind components;\n@tailwind utilities;")
-
-    def build_node_dependencies(self):
-        for pkg in self.state.expose_node_packages:
-            self.build_node_package(pkg)
-        if self.state.copy_files_from_node_modules:
-            self.copy_files_from_node_modules(self.state.copy_files_from_node_modules)
-
-    def map_exposed_node_packages(self):
-        for name in self.state.expose_node_packages:
-            if ":" in name:
-                name, _ = name.split(":", 1)
-            self.map_import(name, f"{self.state.output_url}/vendor/{name}.js")
-
-    def build_node_package(self, name):
-        if ":" in name:
-            name, input = name.split(":", 1)
-        else:
-            input = f"export * from '{name}'"
-        outfile = os.path.join(self.state.output_folder, "vendor", f"{name}.js")
-        if not os.path.exists(outfile):
-            os.makedirs(os.path.dirname(outfile), exist_ok=True)
-            subprocess.run(
-                self.make_esbuild_command(
-                    [
-                        "--bundle",
-                        "--minify",
-                        "--format=esm",
-                        f"--sourcefile={name}.js",
-                        f"--outfile={outfile}",
-                    ]
-                ),
-                input=input.encode("utf-8"),
-            )
-
-    def copy_files_from_node_modules(self, files):
-        copy_files(files, self.state.node_modules_path, self.app.static_folder, self.app.logger)
-
-
-def is_abs_url(path):
-    return re.match("([a-z]+:)?//", path)
+        for builder in builtins + self.state.builders:
+            if isinstance(builder, str):
+                if ":" in builder:
+                    module, class_name = builder.rsplit(":", 1)
+                else:
+                    module = builder
+                    class_name = None
+                m = importlib.import_module(module)
+                if class_name:
+                    builder = getattr(m, class_name)
+                else:
+                    for cls in m.__dict__.values():
+                        if isinstance(cls, type) and issubclass(cls, BuilderBase):
+                            builder = cls
+                            break
+                if isinstance(builder, str):
+                    raise Exception(f"Builder class '{builder}' not found in module")
+            elif isinstance(builder, type):
+                builder = builder()
+            builder.init(self)
+            self.builders.append(builder)
+        return self.builders
+    
+    def get_builder(self, builder_class):
+        for builder in self.load_builders():
+            if isinstance(builder, builder_class):
+                return builder
+        builder = builder_class()
+        builder.init(self)
+        return builder

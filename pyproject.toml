@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "flask-assets-pipeline"
-version = "0.1.4"
+version = "0.2.0"
 description = "Modern asset pipeline for Flask"
 authors = ["Maxime Bouroumeau-Fuseau <maxime.bouroumeau@gmail.com>"]
 readme = "README.md"

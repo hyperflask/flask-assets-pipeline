@@ -62,11 +62,17 @@ class AssetTagsExtension(Extension):
 
     def parse(self, parser):
         lineno = next(parser.stream).lineno
-        return nodes.Output([self.attr("asset_tags")], lineno=lineno)
+        if not parser.stream.current.test("block_end"):
+            args = [parser.parse_expression()]
+            return nodes.Output([self.call_method("asset_tags", args, lineno=lineno)])
+        return nodes.Output([self.attr("default_asset_tags")], lineno=lineno)
 
     @property
-    def asset_tags(self):
+    def default_asset_tags(self):
         return AssetTagsStr()
+    
+    def asset_tags(self, filename):
+        return current_app.extensions["assets"].instance.tags(filename)
 
 
 class InlineAssetExtension(Extension):

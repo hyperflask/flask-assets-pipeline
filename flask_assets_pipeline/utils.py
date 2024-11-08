@@ -1,6 +1,7 @@
 import os
 import shutil
 import hashlib
+import re
 
 
 def copy_assets(src, dest, stamp=True, ignore_files=None, logger=None):
@@ -60,3 +61,7 @@ def hash_file(filename):
         while n := f.readinto(mv):
             h.update(mv[:n])
     return h.hexdigest()
+
+
+def is_abs_url(path):
+    return re.match("([a-z]+:)?//", path)
