@@ -20,7 +20,7 @@ from .builders.tailwind import TailwindBuilder
 
 @dataclass
 class AssetsPipelineState:
-    bundles: t.Mapping[str, t.Sequence[str | "Entrypoint"]]
+    bundles: t.Mapping[str, t.Sequence[t.Union[str, "Entrypoint"]]]
     include: t.Sequence[t.Tuple[int, str]]
     route_template: str
     inline: bool
