@@ -64,4 +64,4 @@ def hash_file(filename):
 
 
 def is_abs_url(path):
-    return re.match("([a-z]+:)?//", path)
+    return re.match("([a-z]+:)?//", path) if isinstance(path, str) else False

@@ -20,7 +20,7 @@ from .builders.tailwind import TailwindBuilder
 
 @dataclass
 class AssetsPipelineState:
-    bundles: t.Sequence[str] | t.Mapping[str, t.Sequence[str]]
+    bundles: t.Mapping[str, t.Sequence[str | "Entrypoint"]]
     include: t.Sequence[t.Tuple[int, str]]
     route_template: str
     inline: bool
@@ -236,7 +236,7 @@ class AssetsPipeline:
         app.cli.add_command(assets_cli)
         self.builders = []
 
-    def bundle(self, assets, name=None, include=False, priority=1, assets_folder=None, output_folder=None):
+    def bundle(self, assets, name=None, include=False, priority=1, from_package=None, assets_folder=None, output_folder=None):
         bundles = {}
         if isinstance(assets, dict):
             bundles = assets
@@ -245,27 +245,13 @@ class AssetsPipeline:
         else:
             bundles = {f: [f] for f in assets}
         for name, files in bundles.items():
-            self.state.bundles[name] = [self.format_bundle_file(f, assets_folder=assets_folder, output_folder=output_folder) for f in files]
+            self.state.bundles[name] = [
+                f if isinstance(f, Entrypoint) or is_abs_url(f) else
+                Entrypoint.create(f, from_package=from_package, assets_folder=assets_folder, output_folder=output_folder)
+                for f in files
+            ]
         if include:
             self.include(list(bundles.keys()), priority)
-
-    def format_bundle_file(self, filename, outfile=None, assets_folder=None, output_folder=None):
-        if is_abs_url(filename):
-            return filename
-        if "=" in filename:
-            filename, _outfile = filename.split("=", 1)
-            if not outfile:
-                outfile = _outfile
-        path = filename
-        if assets_folder and not os.path.isabs(filename):
-            path = os.path.abspath(os.path.join(assets_folder, filename))
-            if not outfile:
-                outfile = filename
-        if output_folder:
-            outfile = os.path.join(output_folder, outfile or filename)
-        if outfile:
-            return path, outfile
-        return path
 
     def blueprint_bundle(self, blueprint, assets, include=False):
         return self.bundle(
@@ -276,31 +262,14 @@ class AssetsPipeline:
             output_folder=blueprint.name,
         )
 
-    def bundle_files(self, name=None, entrypoint_only=False):
-        _files = []
+    def bundle_files(self, name=None, entrypoints_only=False):
         if name:
             files = self.state.bundles[name]
         else:
             files = [f for files in self.state.bundles.values() for f in files]
-        for file in files:
-            entrypoint = file
-            outfile = None
-            if isinstance(file, (tuple, list)):
-                entrypoint, outfile = file
-            elif not is_abs_url(file) and "=" in file:
-                entrypoint, outfile = file.split("=", 1)
-            _files.append((entrypoint, outfile))
-        return [f[0] for f in _files] if entrypoint_only else _files
-
-    def package_from_path(self, path, alias=None):
-        if not alias:
-            alias = os.path.basename(path)
-        self.state.esbuild_aliases[alias] = os.path.abspath(path)
-
-    def package_from_blueprint(self, blueprint, alias=None):
-        if not alias:
-            alias = blueprint.name
-        self.state.esbuild_aliases[alias] = os.path.abspath(blueprint.static_folder)
+        if entrypoints_only:
+            return [f if isinstance(f, Entrypoint) else Entrypoint.create(f) for f in files if not is_abs_url(f)]
+        return files
 
     def include(self, path, priority=1):
         if not isinstance(path, (tuple, list)):
@@ -308,7 +277,7 @@ class AssetsPipeline:
         assets = g.include_assets if has_request_context() else self.state.include
         for p in path:
             if p in self.state.bundles:
-                assets.extend([(priority, f) for f in self.bundle_files(p, True)])
+                assets.extend([(priority, str(e)) for e in self.bundle_files(p)])
             else:
                 assets.append([priority, p])
 
@@ -364,7 +333,7 @@ class AssetsPipeline:
                     url = self.state.cdn_host + url
             urls[url] = url_meta
             
-        urls = list(urls.keys()) if not with_meta else urls.items()
+        urls = list(urls.keys() if not with_meta else urls.items())
         return urls[0] if single else urls
 
     def urls(self, paths=None, with_meta=False):
@@ -506,3 +475,50 @@ class AssetsPipeline:
         builder = builder_class()
         builder.init(self)
         return builder
+
+
+@dataclass
+class Entrypoint:
+    filename: str
+    outfile: t.Optional[str] = None
+    from_package: t.Optional[str] = None
+
+    @classmethod
+    def create(cls, filename, outfile=None, from_package=None, assets_folder=None, output_folder=None):
+        if "=" in filename:
+            filename, outfile = filename.split("=", 1)
+        if ":" in filename:
+            from_package, filename = filename.split(":", 1)
+            if not outfile:
+                outfile = filename
+        path = filename
+        if assets_folder and not os.path.isabs(filename):
+            path = os.path.join(assets_folder, filename)
+            if not outfile:
+                outfile = filename
+        if output_folder:
+            outfile = os.path.join(output_folder, outfile or filename)
+        return cls(path, outfile, from_package)
+    
+    @property
+    def path(self):
+        return f"{self.from_package}:{self.filename}" if self.from_package else self.filename
+    
+    def resolve_path(self, assets_folder=None):
+        filename = self.filename
+        if self.from_package:
+            filename = resolve_package_file(self.from_package, filename)
+        elif not os.path.isabs(filename) and assets_folder:
+            filename = os.path.join(assets_folder, filename)
+        return filename
+    
+    def __str__(self):
+        return self.path
+    
+    def __repr__(self):
+        return f"{self.path}={self.outfile}" if self.outfile else self.path
+
+
+def resolve_package_file(package, filename):
+    m = importlib.import_module(package)
+    return os.path.join(os.path.dirname(m.__file__), filename)

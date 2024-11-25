@@ -1,5 +1,4 @@
 from ..builder import BuilderBase
-from ..utils import is_abs_url
 import tempfile
 import subprocess
 import os
@@ -17,7 +16,7 @@ class EsbuildBuilder(BuilderBase):
     @property
     def prefix(self):
         return f"[{self.assets.state.esbuild_script}]" if self.assets.state.esbuild_script else "[esbuild]"
-        
+
     def start_dev_worker(self, exit_event, build_only=False, livereloader=None):
         process = super().start_dev_worker(exit_event, build_only, livereloader)
         if process and build_only:
@@ -48,20 +47,17 @@ class EsbuildBuilder(BuilderBase):
         mapping.update(_mapping)
         ignore_assets.extend(inputs)
         os.unlink(self.metafile.name)
-    
+
     def get_command(self, watch=False, dev=False, metafile=None):
         state = self.assets.state
         inputs = []
         entrypoints = []
-        for entrypoint, outfile in self.assets.bundle_files():
-            if is_abs_url(entrypoint):
-                continue
-            if not os.path.isabs(entrypoint):
-                entrypoint = os.path.join(state.assets_folder, entrypoint)
-            inputs.append(entrypoint)
-            if outfile:
-                entrypoint = f"{outfile}={entrypoint}"
-            entrypoints.append(entrypoint)
+        for entrypoint in self.assets.bundle_files(entrypoints_only=True):
+            path = entrypoint.resolve_path(state.assets_folder)
+            inputs.append(path)
+            if entrypoint.outfile:
+                path = f"{entrypoint.outfile}={path}"
+            entrypoints.append(path)
 
         if state.esbuild_script:
             cmd = self.make_script_command()
@@ -130,33 +126,33 @@ class EsbuildBuilder(BuilderBase):
             if isinstance(self.assets.state.esbuild_bin, list)
             else [self.assets.state.esbuild_bin, *args]
         )
-    
+
     def convert_metafile(self, filename=None):
         state = self.assets.state
         if not filename:
             filename = state.esbuild_metafile
-        inputrel = os.path.relpath(state.assets_folder) + "/"
         outputrel = os.path.relpath(state.output_folder)
+
+        entrypoints = {}
+        for entrypoint in self.assets.bundle_files(entrypoints_only=True):
+            path = entrypoint.resolve_path(state.assets_folder)
+            entrypoints[path] = entrypoint
 
         with open(filename) as f:
             meta = json.load(f)
 
         inputs = []
-        for input, info in meta["inputs"].items():
-            inputs.append(
-                input[len(inputrel) :] if input.startswith(inputrel) else os.path.abspath(input)
-            )
-
         mapping = {}
         for output, info in meta["outputs"].items():
             if "entryPoint" not in info:
                 continue
-            o = mapping.setdefault(
-                info["entryPoint"][len(inputrel) :]
-                if info["entryPoint"].startswith(inputrel)
-                else os.path.abspath(info["entryPoint"]),
-                [],
-            )
+            path = os.path.abspath(info["entryPoint"])
+            if path not in entrypoints:
+                continue
+            if not entrypoints[path].from_package and not os.path.isabs(entrypoints[path].filename):
+                inputs.append(entrypoints[path].filename)
+            path = entrypoints[path].path
+            o = mapping.setdefault(path, [])
             url = state.output_url + output[len(outputrel) :]
             if url.endswith(".js"):
                 url = [url, {"modifier": "import"}]
