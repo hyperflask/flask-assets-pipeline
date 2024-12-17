@@ -54,7 +54,7 @@ class CodeGenerator(BaseCodeGenerator):
 
 class AssetTagsStr:
     def __str__(self):
-        return current_app.extensions["assets"].instance.tags()
+        return current_app.extensions["assets"].instance.head()
 
 
 class AssetTagsExtension(Extension):

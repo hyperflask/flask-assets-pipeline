@@ -1,4 +1,4 @@
-from flask import render_template, g, has_request_context, url_for, send_from_directory
+from flask import render_template, g, has_request_context, url_for, send_from_directory, current_app
 from markupsafe import Markup
 from dataclasses import dataclass
 import typing as t
@@ -16,6 +16,7 @@ from .builders.node_deps import NodeDependenciesBuilder
 from .builders.templates import TemplateBuilder
 from .builders.esbuild import EsbuildBuilder
 from .builders.tailwind import TailwindBuilder
+from .builders.cache_worker import CacheServiceWorkerBuilder, CACHE_WORKER_SCRIPT
 
 
 @dataclass
@@ -25,6 +26,7 @@ class AssetsPipelineState:
     route_template: str
     inline: bool
     include_inline_on_demand: bool
+    inline_template_exts: t.Sequence[str]
     import_map: t.Mapping[str, str]
     expose_node_packages: t.Sequence[str]
     assets_folder: str
@@ -51,6 +53,11 @@ class AssetsPipelineState:
     copy_files_from_node_modules: t.Mapping[str, str]
     cdn_host: str
     cdn_enabled: bool
+    cache_worker: bool
+    cache_worker_name: t.Optional[str]
+    cache_worker_urls: t.Sequence[str]
+    cache_worker_filename: str
+    cache_worker_register: bool
     mapping: t.Mapping[str, t.Sequence[str]]
     watch_template_folders: t.Sequence[str]
     builders: t.Sequence[t.Type[BuilderBase]]
@@ -95,6 +102,7 @@ class AssetsPipeline:
         route_template="frontend_route.html",
         inline=False,
         include_inline_on_demand=False,
+        inline_template_exts=[".html", ".jinja"],
         import_map=None,
         expose_node_packages=None,
         assets_folder=None,
@@ -120,6 +128,11 @@ class AssetsPipeline:
         copy_files_from_node_modules=None,
         cdn_host=None,
         cdn_enabled=None,
+        cache_worker=False,
+        cache_worker_name=None,
+        cache_worker_urls=None,
+        cache_worker_filename="cache-worker.js",
+        cache_worker_register=None,
         with_jinja_ext=True
     ):
         bundles = app.config.get("ASSETS_BUNDLES", bundles)
@@ -149,6 +162,7 @@ class AssetsPipeline:
             route_template=app.config.get("ASSETS_ROUTE_TEMPLATE", route_template),
             inline=app.config.get("ASSETS_INLINE", inline),
             include_inline_on_demand=app.config.get("ASSETS_INCLUDE_INLINE_ON_DEMAND", include_inline_on_demand),
+            inline_template_exts=app.config.get("ASSETS_INLINE_TEMPLATE_EXTS", inline_template_exts) or [],
             import_map=app.config.get("ASSETS_IMPORT_MAP", import_map) or {},
             expose_node_packages=app.config.get("ASSETS_EXPOSE_NODE_PACKAGES", expose_node_packages) or [],
             assets_folder=assets_folder,
@@ -164,8 +178,8 @@ class AssetsPipeline:
             esbuild_bin=app.config.get("ASSETS_ESBUILD_BIN", esbuild_bin),
             esbuild_splitting=app.config.get("ASSETS_ESBUILD_SPLITTING", esbuild_splitting),
             esbuild_target=app.config.get("ASSETS_ESBUILD_TARGET", esbuild_target),
-            esbuild_aliases=app.config.get("ASSETS_PACKAGE_ALIASES", esbuild_aliases) or {},
-            esbuild_external=app.config.get("ASSETS_EXTERNAL_PACKAGES", esbuild_external) or [],
+            esbuild_aliases=app.config.get("ASSETS_ESBUILD_ALIASES", esbuild_aliases) or {},
+            esbuild_external=app.config.get("ASSETS_ESBUILD_EXTERNAL", esbuild_external) or [],
             livereload_port=app.config.get("ASSETS_LIVERELOAD_PORT", livereload_port),
             tailwind=app.config.get("ASSETS_TAILWIND", tailwind),
             tailwind_args=app.config.get("ASSETS_TAILWIND_ARGS", tailwind_args) or [],
@@ -175,6 +189,11 @@ class AssetsPipeline:
             copy_files_from_node_modules=app.config.get("ASSETS_COPY_FILES_FROM_NODE_MODULES", copy_files_from_node_modules) or {},
             cdn_host=app.config.get("ASSETS_CDN_HOST", cdn_host),
             cdn_enabled=not app.debug if cdn_enabled is None else cdn_enabled,
+            cache_worker=app.config.get("ASSETS_CACHE_WORKER", cache_worker),
+            cache_worker_name=app.config.get("ASSETS_CACHE_WORKER_NAME", cache_worker_name),
+            cache_worker_urls=app.config.get("ASSETS_CACHE_WORKER_URLS", cache_worker_urls) or [],
+            cache_worker_filename=app.config.get("ASSETS_CACHE_WORKER_FILENAME", cache_worker_filename),
+            cache_worker_register=app.config.get("ASSETS_CACHE_WORKER_REGISTER", cache_worker_register),
             mapping={},
             watch_template_folders=[],
             builders=[],
@@ -198,9 +217,15 @@ class AssetsPipeline:
             self.bundle(bundles, include=include is None)
         if include:
             self.include(include)
+        if state.tailwind:
+            self.include(f"{state.output_url}/{state.tailwind}")
 
         if not state.cdn_host:
             state.cdn_enabled = False
+        if state.cache_worker_register is None:
+            state.cache_worker_register = state.cache_worker
+        if state.cache_worker_register:
+            self.register_cache_worker_route()
 
         if separate_assets_folder and app.debug:
             # in debug mode, no need to copy assets to static, we serve them directly
@@ -220,8 +245,6 @@ class AssetsPipeline:
         @app.before_request
         def before_request():
             g.include_assets = list(state.include)
-            if state.tailwind:
-                self.include(f"{state.output_url}/{state.tailwind}")
 
         def include_asset(*args, **kwargs):
             self.include(*args, **kwargs)
@@ -243,7 +266,7 @@ class AssetsPipeline:
         elif name:
             bundles[name] = assets
         else:
-            bundles = {f: [f] for f in assets}
+            bundles = {str(f): [f] for f in assets}
         for name, files in bundles.items():
             self.state.bundles[name] = [
                 f if isinstance(f, Entrypoint) or is_abs_url(f) else
@@ -276,7 +299,7 @@ class AssetsPipeline:
             path = [path]
         assets = g.include_assets if has_request_context() else self.state.include
         for p in path:
-            if p in self.state.bundles:
+            if not isinstance(p, (tuple, list)) and p in self.state.bundles:
                 assets.extend([(priority, str(e)) for e in self.bundle_files(p)])
             else:
                 assets.append([priority, p])
@@ -292,8 +315,8 @@ class AssetsPipeline:
                 g.assets_map = mapping
         return mapping.get(filename, [filename])
 
-    def url(self, filename, with_meta=False, single=True, external=False):
-        r = re.compile("(static|import|prefetch|modulepreload|preload( as [a-z]+)?) ")
+    def url(self, filename, with_meta=False, single=True, external=False, with_pre=False, resolve=True):
+        r = re.compile("(defer )?(static|import|prefetch|modulepreload|preload( as [a-z]+)?) ")
         meta = {}
         if isinstance(filename, (tuple, list)):
             filename, meta = filename
@@ -302,7 +325,9 @@ class AssetsPipeline:
         else:
             m = r.match(filename)
             if m:
-                meta["modifier"] = m.group(1)
+                if m.group(1):
+                    meta["defer"] = True
+                meta["modifier"] = m.group(2)
                 filename = filename[m.end() :]
                 if meta["modifier"].startswith("preload as "):
                     meta["modifier"], meta["content_type"] = meta["modifier"].split(" as ", 1)
@@ -315,7 +340,8 @@ class AssetsPipeline:
             meta.update(urllib.parse.parse_qs(fragment))
 
         urls = {}
-        for url in self.resolve_asset_filename_to_url(filename):
+        resolved_urls = self.resolve_asset_filename_to_url(filename) if resolve else [filename]
+        for url in resolved_urls:
             url_meta = dict(meta)
             if isinstance(url, (tuple, list)):
                 url, _meta = url
@@ -331,12 +357,14 @@ class AssetsPipeline:
                     )
                 if self.state.cdn_enabled:
                     url = self.state.cdn_host + url
+            if not with_pre and url_meta.get("modifier") in ("prefetch", "preload", "modulepreload"):
+                continue
             urls[url] = url_meta
             
         urls = list(urls.keys() if not with_meta else urls.items())
         return urls[0] if single else urls
 
-    def urls(self, paths=None, with_meta=False):
+    def urls(self, paths=None, with_meta=False, external=False, with_pre=False, resolve=True):
         if paths is None:
             includes = g.include_assets if has_request_context() and 'include_assets' in g else self.state.include
             paths = [i[1] for i in sorted(includes, key=lambda i: i[0], reverse=True)]
@@ -344,20 +372,29 @@ class AssetsPipeline:
             paths = [paths]
         urls = {}
         for f in paths:
-            urls.update(dict(self.url(f, with_meta=True, single=False)))
+            urls.update(dict(self.url(f, with_meta=True, single=False, external=external, with_pre=with_pre, resolve=resolve)))
         return urls.items() if with_meta else list(urls.keys())
 
-    def tags(self, paths=None):
+    def split_urls(self, paths=None, with_meta=False, external=False, resolve=True):
+        urls = self.urls(paths, with_meta=True, external=external, with_pre=True, resolve=resolve)
+        pre = []
+        scripts = []
+        styles = []
+        for url, meta in urls:
+            if meta.get("modifier") in ("prefetch", "preload", "modulepreload"):
+                pre.append((url, meta) if with_meta else url)
+            elif url.endswith(".css") or meta.get("content_type") == "style":
+                styles.append((url, meta) if with_meta else url)
+            else:
+                scripts.append((url, meta) if with_meta else url)
+        return pre, scripts, styles
+
+    def tags(self, paths=None, external=False, with_pre=True, resolve=True):
         tags = []
         pre = []
-        if self.state.import_map:
-            tags.append(
-                '<script type="importmap">%s</script>'
-                % json.dumps({"imports": self.state.import_map})
-            )
-        for url, meta in self.urls(paths, with_meta=True):
+        for url, meta in self.urls(paths, with_meta=True, external=external, with_pre=with_pre, resolve=resolve):
             attrs = "".join(
-                f' {k}="{v}"'
+                f' {k}' if v is True else f' {k}="{v}"'
                 for k, v in meta.items()
                 if v and k not in ("modifier", "content_type")
             )
@@ -375,9 +412,21 @@ class AssetsPipeline:
                 tags.append('<link rel="stylesheet" href="%s"%s>' % (url, attrs))
             else:
                 tags.append('<script src="%s"%s></script>' % (url, attrs))
+        return Markup("\n".join(pre + tags))
+
+    def head(self):
+        tags = []
+        if self.state.import_map:
+            tags.append(
+                '<script type="importmap">%s</script>'
+                % json.dumps({"imports": self.state.import_map})
+            )
+        tags.append(self.tags())
+        if self.state.cache_worker_register:
+            tags.append(CACHE_WORKER_SCRIPT % {"worker_url": url_for("cache_service_worker")})
         if self.app.debug:
             tags.append(LIVERELOAD_SCRIPT % {"livereload_port": self.state.livereload_port})
-        return Markup("\n".join(pre + tags))
+        return Markup("\n".join(tags))
 
     def add_route(self, endpoint, url, decorators=None, template=None, app=None, **options):
         app = app or self.app
@@ -389,6 +438,12 @@ class AssetsPipeline:
         urls = url if isinstance(url, (list, tuple)) else [url]
         for url in urls:
             app.add_url_rule(url, endpoint, view_func, **options)
+
+    def add_catch_all_route(self, include_root=True, endpoint="frontend_catch_all", **kwargs):
+        paths = ["/<path:path>"]
+        if include_root:
+            paths.append("/")
+        self.add_route(endpoint, paths, **kwargs)
 
     def map_import(self, name, url):
         self.state.import_map[name] = url
@@ -443,30 +498,40 @@ class AssetsPipeline:
             NodeDependenciesBuilder(),
             TemplateBuilder(),
             EsbuildBuilder(),
-            TailwindBuilder(),
         ]
+        if self.state.tailwind:
+            builtins.append(TailwindBuilder())
+        if self.state.cache_worker:
+            builtins.append(CacheServiceWorkerBuilder())
         for builder in builtins + self.state.builders:
-            if isinstance(builder, str):
-                if ":" in builder:
-                    module, class_name = builder.rsplit(":", 1)
-                else:
-                    module = builder
-                    class_name = None
-                m = importlib.import_module(module)
-                if class_name:
-                    builder = getattr(m, class_name)
-                else:
-                    for cls in m.__dict__.values():
-                        if isinstance(cls, type) and issubclass(cls, BuilderBase):
-                            builder = cls
-                            break
-                if isinstance(builder, str):
-                    raise Exception(f"Builder class '{builder}' not found in module")
-            elif isinstance(builder, type):
-                builder = builder()
-            builder.init(self)
-            self.builders.append(builder)
+            self.load_builder(builder)
         return self.builders
+
+    def load_builder(self, builder, prepend=False):
+        if isinstance(builder, str):
+            if ":" in builder:
+                module, class_name = builder.rsplit(":", 1)
+            else:
+                module = builder
+                class_name = None
+            m = importlib.import_module(module)
+            if class_name:
+                builder = getattr(m, class_name)
+            else:
+                for cls in m.__dict__.values():
+                    if isinstance(cls, type) and issubclass(cls, BuilderBase):
+                        builder = cls
+                        break
+            if isinstance(builder, str):
+                raise Exception(f"Builder class '{builder}' not found in module")
+        elif isinstance(builder, type):
+            builder = builder()
+        builder.init(self)
+        if prepend:
+            self.builders.insert(0, builder)
+        else:
+            self.builders.append(builder)
+        return builder
     
     def get_builder(self, builder_class):
         for builder in self.load_builders():
@@ -475,6 +540,13 @@ class AssetsPipeline:
         builder = builder_class()
         builder.init(self)
         return builder
+    
+    def register_cache_worker_route(self, url=None):
+        def view_func():
+            resp = send_from_directory(self.state.output_folder, self.state.cache_worker_filename, mimetype="text/javascript")
+            resp.headers.add("Expires", 0)
+            return resp
+        self.app.add_url_rule(url or f"/{self.state.cache_worker_filename}", endpoint="cache_service_worker", view_func=view_func)
 
 
 @dataclass
@@ -489,8 +561,8 @@ class Entrypoint:
             filename, outfile = filename.split("=", 1)
         if ":" in filename:
             from_package, filename = filename.split(":", 1)
-            if not outfile:
-                outfile = filename
+        if from_package and not outfile:
+            outfile = filename
         path = filename
         if assets_folder and not os.path.isabs(filename):
             path = os.path.join(assets_folder, filename)
@@ -504,9 +576,15 @@ class Entrypoint:
     def path(self):
         return f"{self.from_package}:{self.filename}" if self.from_package else self.filename
     
+    @property
+    def is_abs(self):
+        return self.from_package or os.path.isabs(self.filename)
+    
     def resolve_path(self, assets_folder=None):
         filename = self.filename
-        if self.from_package:
+        if self.from_package == "jinja":
+            filename = current_app.jinja_env.loader.get_source(current_app.jinja_env, filename)[1] # resolve filename without compiling templates
+        elif self.from_package:
             filename = resolve_package_file(self.from_package, filename)
         elif not os.path.isabs(filename) and assets_folder:
             filename = os.path.join(assets_folder, filename)

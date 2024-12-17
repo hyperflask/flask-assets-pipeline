@@ -38,8 +38,9 @@ class TemplateBuilder(BuilderBase):
         with self.assets.app.app_context():
             env.write_inline_assets = write
             for template in loader.list_templates():
-                source = loader.get_source(env, template)[0]
-                env.compile(source, template) # force the compilation so the extension parse() method is executed
+                if template.rsplit(".", 1)[1].lower() in self.assets.state.inline_template_exts:
+                    source = loader.get_source(env, template)[0]
+                    env.compile(source, template) # force the compilation so the extension parse() method is executed
 
 
 class TemplateCompilerHandler(FileSystemEventHandler):
@@ -51,6 +52,8 @@ class TemplateCompilerHandler(FileSystemEventHandler):
     def on_modified(self, event):
         if not event.is_directory and os.path.abspath(event.src_path).startswith(self.path):
             tpl = os.path.relpath(event.src_path, self.path)
+            if template.rsplit(".", 1)[1].lower() not in self.app.extensions["assets"].inline_template_exts:
+                return
             try:
                 with self.app.app_context():
                     try:

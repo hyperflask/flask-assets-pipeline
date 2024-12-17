@@ -30,14 +30,11 @@ from flask import Flask
 from flask_assets_pipeline import AssetsPipeline
 
 app = Flask(__name__)
-assets = AssetsPipeline(app, bundles=[
-    'app.js',
-    'app.css'
-])
+assets = AssetsPipeline(app, bundles=['app.js'])
 ```
 
-> [!TIP]
-> You can also import css in your js files directly. Related stylesheets will be automatically included when their corresponding js is included.
+> [!INFO]
+> Related stylesheets will be automatically included when their corresponding js is included.
 
 In your template, use the `asset_tags` directive to render the needed tags to include your assets.
 
@@ -79,7 +76,7 @@ Files from all named bundles will be provided as input in the esbuild command.
 
 [Code splitting](https://esbuild.github.io/api/#splitting) is enabled by default.
 
-The `bundle()` and `blueprint_bundle()` methods allow you to register bundle with more options.
+The `bundle()` and `blueprint_bundle()` methods allow you to register bundles with more options.
 
 ### Manage included assets
 
@@ -249,6 +246,8 @@ you can register them:
 ```python
 assets.add_route("login", "/login")
 assets.add_route("account", "/account", decorators=[login_required]) # apply decorators
+
+assets.add_catch_all_route() # catch all unknown paths
 ```
 
 These routes simply return a rendered template defined using `ASSETS_ROUTE_TEMPLATE` (default is *frontend_route.html*)
@@ -327,6 +326,26 @@ assets = AssetsPipeline(app, ..., cdn_host="https://xxx.cloudfront.net")
 
 You can control when the cdn is used or not using the ASSETS_CDN_ENABLED config option (it will override the default behavior).
 
+## Cache service worker
+
+A [service worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers) to cache assets files locally can be automatically generated. It will include all bundled assets. This is particularly useful for [PWAs](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps).
+
+```python
+assets = AssetsPipeline(app, ..., cache_worker=True)
+```
+
+The worker will be automatically registered on page load when using `{% asset_tags %}`.
+
+## Customizing esbuild
+
+To customize esbuild, you can use a custom script. When the script is ran, it will be provided environment variables that can help with configuration.
+
+```python
+assets = AssetsPipeline(app, ..., esbuild_script="esbuild.mjs")
+```
+
+Use the command `flask assets generate-esbuild-script` to generate a base script that shows you the env vars available.
+
 ## Configuration
 
 | Config key | Extension argument | Description | Default |
@@ -335,24 +354,37 @@ You can control when the cdn is used or not using the ASSETS_CDN_ENABLED config 
 | ASSETS_INCLUDE | include | List of assets to include in your page | All assets in bundles |
 | ASSETS_ROUTE_TEMPLATE | route_template | The template to use for frontend routes | frontend_route.html |
 | ASSETS_INLINE | inline | Whether to extract assets from templates | False |
+| ASSETS_INCLUDE_INLINE_ON_DEMAND | include_inline_on_demand | Whether to only include inline assets when the template is used | False |
+| ASSETS_INLINE_TEMPLATE_EXTS | inline_template_exts | File extensions to process when looking for templates | .html .jinja |
 | ASSETS_IMPORT_MAP | import_map | ES Modules import map | {} |
 | ASSETS_EXPOSE_NODE_PACKAGES | expose_node_packages | Node packages to expose to the frontend via the import map | [] |
 | ASSETS_FOLDER | assets_folder | Search path for asset files | The app static_folder |
 | ASSETS_URL_PATH | assets_url_path | Base URL for the assets endpoint when in debug mode | /static/assets |
-| ASSETS_STAMP_ASSETS | stamp_assets | Whether to stamp filenames with the file's hash when copying files from the assets folder to the static folder | True |
+| ASSETS_STAMP | stamp_assets | Whether to stamp filenames with the file's hash when copying files from the assets folder to the static folder | True |
 | ASSETS_OUTPUT_FOLDER | output_folder | The output folder for bundled files relative to the static folder | dist |
 | ASSETS_OUTPUT_URL | output_url | Base url for outputted file | /static/dist |
 | ASSETS_MAPPING_FILE | mapping_file | Location of the mapping file to resolve assets filename to their built equivalent | assets.json |
+| ASSETS_ESBUILD_SCRIPT | esbuild_script | Use a custom script calling esbuild insteaf of esbuild's cli | |
 | ASSETS_ESBUILD_ARGS | esbuild_args | Additional esbuild arguments | [] |
 | ASSETS_ESBUILD_BIN | esbuild_bin | esbuild binary location | npx esbuild |
 | ASSETS_ESBUILD_SPLITTING | esbuild_splitting | Use the --splitting option | True |
 | ASSETS_ESBUILD_TARGET | esbuild_target | Set the target option for esbuild (use a list) | [] |
+| ASSETS_ESBUILD_ALIASES | esbuild_aliases | Esbuild aliases | {} |
+| ASSETS_ESBUILD_EXTERNAL | esbuild_external | Esbuild external imports | [] |
 | ASSETS_LIVERELOAD_PORT | livereload_port | Port onto which to start the livereloading server | 8000 |
 | ASSETS_TAILWIND | tailwind | Tailwind input css file | |
 | ASSETS_TAILWIND_ARGS | tailwind_args | Additional tailwind arguments | [] |
 | ASSETS_TAILWIND_BIN | tailwind_bin | tailwindcss binary location | npx tailwindcss |
+| ASSETS_TAILWIND_SUGGESTED_CONTENT | tailwind_suggested_content | Additional paths that Tailwind should process | [] |
 | ASSETS_NODE_MODULES_PATH | node_modules_path | Path to the node_modules directory | node_modules |
 | ASSETS_COPY_FILES_FROM_NODE_MODULES | copy_files_from_node_modules | Mapping of src/dest files to copy from node modules | {} |
+| ASSETS_CDN_HOST | cdn_host | CDN hostname |  |
+| ASSETS_CDN_ENABLED | cdn_enabled | Whether to use the cdn | True in prod if cdn_host is set |
+| ASSETS_CACHE_WORKER | cache_worker | Whether to generate and register a cache service worker (useful for PWAs) | False |
+| ASSETS_CACHE_WORKER_NAME | cache_worker_name | Name of the cache | Random |
+| ASSETS_CACHE_WORKER_URLS | cache_worker_urls | Additional urls to cache | [] |
+| ASSETS_CACHE_WORKER_FILENAME | cache_worker_filename | Filename of the service worker | cache-worker.js |
+| ASSETS_CACHE_WORKER_REGISTER | cache_worker_register | Whether to register the service worker | True if cache_worker is true |
 
 ## Commands
 
@@ -362,3 +394,5 @@ You can control when the cdn is used or not using the ASSETS_CDN_ENABLED config 
 | assets build | Build your assets for production |
 | assets extract | Extract assets from templates |
 | assets init-tailwind | Create the tailwind config |
+| assets generate-esbuild-script | Generate a script to run esbuild allowing you to customize the build |
+| assets esbuild-script | Run the esbuild script |

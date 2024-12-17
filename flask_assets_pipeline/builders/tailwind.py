@@ -9,8 +9,6 @@ class TailwindBuilder(BuilderBase):
     matchline = "Done in"
 
     def start_dev_worker(self, exit_event, build_only=False, livereloader=None):
-        if not self.assets.state.tailwind:
-            return
         self.check_tailwind_config()
         return super().start_dev_worker(exit_event, build_only, livereloader)
 
@@ -22,8 +20,6 @@ class TailwindBuilder(BuilderBase):
             livereloader.ping()
 
     def build(self, mapping, ignore_assets):
-        if not self.assets.state.tailwind:
-            return
         self.check_tailwind_config()
         cmd, env = self.get_command()
         subprocess.run(cmd, env=dict(os.environ, **env))

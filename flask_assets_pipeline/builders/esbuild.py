@@ -149,7 +149,7 @@ class EsbuildBuilder(BuilderBase):
             path = os.path.abspath(info["entryPoint"])
             if path not in entrypoints:
                 continue
-            if not entrypoints[path].from_package and not os.path.isabs(entrypoints[path].filename):
+            if not entrypoints[path].is_abs:
                 inputs.append(entrypoints[path].filename)
             path = entrypoints[path].path
             o = mapping.setdefault(path, [])
