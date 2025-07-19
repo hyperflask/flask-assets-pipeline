@@ -4,7 +4,7 @@ Modern assets pipeline for Flask.
 
  - Asset bundling using [esbuild](https://esbuild.github.io/).
  - Live reloading
- - Support for [tailwind](https://tailwindcss.com/)
+ - Support for [tailwind](https://tailwindcss.com/) (v4)
  - Compatible with #nobuild leveraging [import maps](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script/type/importmap)
  - Extract inline scripts and styles from templates and bundle them properly
  - CDN support
@@ -155,30 +155,20 @@ Files built using esbuild and tailwind will be generated in a dist folder in the
 Flask-Assets-Pipeline can launch tailwind in the background at the same time as esbuild and build your css file.
 The output css file will be automatically included.
 
+You will need to install Tailwind CLI: `npm install tailwindcss @tailwindcss/cli`
+
 ```python
 assets = AssetsPipeline(app, bundles=[
     'base.js'
 ], tailwind='main.css')
 ```
 
-If the tailwind config or the input file is missing, they will be automatically generated.
-Make sure your tailwind config includes all the needed content paths to watch for.
+If the input file is missing, it will be automatically generated.
+Make sure your tailwind input file lists the correct sources.
 
-Example config:
-
-```js
-/** @type {import('tailwindcss').Config} */
-module.exports = {
-  content: [
-    "./templates/**/*.html",
-    "./static/**/*.js"
-  ],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-}
-```
+> [!TIP]
+> Environment variables can be automatically expanded in your tailwind input file
+> using the configuration `ASSETS_TAILWIND_EXPAND_ENV_VARS=True`
 
 ## Using a separate assets folder
 
@@ -375,7 +365,7 @@ Use the command `flask assets generate-esbuild-script` to generate a base script
 | ASSETS_TAILWIND | tailwind | Tailwind input css file | |
 | ASSETS_TAILWIND_ARGS | tailwind_args | Additional tailwind arguments | [] |
 | ASSETS_TAILWIND_BIN | tailwind_bin | tailwindcss binary location | npx tailwindcss |
-| ASSETS_TAILWIND_SUGGESTED_CONTENT | tailwind_suggested_content | Additional paths that Tailwind should process | [] |
+| ASSETS_TAILWIND_EXPAND_ENV_VARS | tailwind_expand_env_vars | Whether to expand env vars in tailwind input file | False |
 | ASSETS_NODE_MODULES_PATH | node_modules_path | Path to the node_modules directory | node_modules |
 | ASSETS_COPY_FILES_FROM_NODE_MODULES | copy_files_from_node_modules | Mapping of src/dest files to copy from node modules | {} |
 | ASSETS_CDN_HOST | cdn_host | CDN hostname |  |

@@ -34,6 +34,9 @@ class BuilderBase:
             while not exit_event or not exit_event.is_set():
                 line = process.stdout.readline().strip()
                 click.echo(self.prefix + line)
+                if process.poll() is not None:
+                    click.echo(self.prefix + f"Process exited with code {process.returncode}")
+                    break
                 if not self.matchline or re.match(self.matchline, line):
                     self.dev_worker_callback(build_only, livereloader)
 

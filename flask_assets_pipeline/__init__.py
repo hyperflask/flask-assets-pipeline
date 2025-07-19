@@ -48,7 +48,7 @@ class AssetsPipelineState:
     tailwind: str
     tailwind_args: t.Sequence[str]
     tailwind_bin: str
-    tailwind_suggested_content: t.Sequence[str]
+    tailwind_expand_env_vars: t.Sequence[str]
     node_modules_path: str
     copy_files_from_node_modules: t.Mapping[str, str]
     cdn_host: str
@@ -122,8 +122,8 @@ class AssetsPipeline:
         livereload_port="7878",
         tailwind=None,
         tailwind_args=None,
-        tailwind_bin=["npx", "tailwindcss"],
-        tailwind_suggested_content=None,
+        tailwind_bin=["npx", "@tailwindcss/cli"],
+        tailwind_expand_env_vars=None,
         node_modules_path=None,
         copy_files_from_node_modules=None,
         cdn_host=None,
@@ -184,7 +184,7 @@ class AssetsPipeline:
             tailwind=app.config.get("ASSETS_TAILWIND", tailwind),
             tailwind_args=app.config.get("ASSETS_TAILWIND_ARGS", tailwind_args) or [],
             tailwind_bin=app.config.get("ASSETS_TAILWIND_BIN", tailwind_bin),
-            tailwind_suggested_content=app.config.get("ASSETS_TAILWIND_SUGGESTED_CONTENT", tailwind_suggested_content) or [],
+            tailwind_expand_env_vars=app.config.get("ASSETS_TAILWIND_EXPAND_ENV_VARS", tailwind_expand_env_vars) or [],
             node_modules_path=app.config.get("ASSETS_NODE_MODULES_PATH", node_modules_path) or os.environ.get("NODE_PATH", "node_modules"),
             copy_files_from_node_modules=app.config.get("ASSETS_COPY_FILES_FROM_NODE_MODULES", copy_files_from_node_modules) or {},
             cdn_host=app.config.get("ASSETS_CDN_HOST", cdn_host),

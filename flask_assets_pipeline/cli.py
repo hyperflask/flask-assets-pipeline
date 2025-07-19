@@ -102,7 +102,7 @@ def extract():
 def init_tailwind():
     """Initialize tailwind configuration and input file (if they are missing)"""
     builder = current_app.extensions["assets"].instance.get_builder(TailwindBuilder)
-    builder.check_tailwind_config()
+    builder.check_tailwind_setup()
 
 
 @assets_cli.command()
@@ -150,9 +150,3 @@ def esbuild_script(watch, dev, args):
     cmd = builder.make_script_command()
     cmd.extend(args)
     subprocess.run(cmd, env=dict(os.environ, **env))
-
-
-@assets_cli.command()
-@click.argument("name")
-def download_google_font(name):
-    pass
