@@ -19,7 +19,7 @@ class BuilderBase:
         if not args:
             self.build({}, [])
             return
-        
+
         kwargs = (
             {"text": True, "bufsize": 1, "stdout": subprocess.PIPE, "stderr": subprocess.STDOUT}
             if self.dev_worker_callback
@@ -43,13 +43,13 @@ class BuilderBase:
         thread = threading.Thread(target=task)
         thread.start()
         return process
-    
+
     def get_dev_worker_command(self, build_only):
         return None, None
-    
+
     def cleanup_after_dev_worker(self):
         pass
-    
+
     def build(self, mapping, ignore_assets):
         raise NotImplementedError()
 

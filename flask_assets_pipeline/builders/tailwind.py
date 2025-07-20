@@ -14,7 +14,7 @@ class TailwindBuilder(BuilderBase):
 
     def get_dev_worker_command(self, build_only):
         return self.get_command(watch=not build_only, dev=True), {}
-    
+
     def dev_worker_callback(self, build_only, livereloader):
         if livereloader:
             livereloader.ping()
@@ -56,4 +56,4 @@ class TailwindBuilder(BuilderBase):
         filename = os.path.join(state.assets_folder, state.tailwind)
         if not os.path.exists(filename):
             with open(filename, "w") as f:
-                f.write(f"@import \"tailwindcss\";\n")
+                f.write('@import "tailwindcss";\n')

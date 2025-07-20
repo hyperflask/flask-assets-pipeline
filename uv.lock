@@ -132,7 +132,7 @@ wheels = [
 
 [[package]]
 name = "flask-assets-pipeline"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "flask" },
@@ -148,8 +148,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "flask", specifier = ">=3.0.0" },
-    { name = "watchdog", specifier = ">=6.0.0" },
+    { name = "flask", specifier = "~=3.0" },
+    { name = "watchdog", specifier = "~=6.0" },
 ]
 
 [package.metadata.requires-dev]

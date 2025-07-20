@@ -15,7 +15,11 @@ class EsbuildBuilder(BuilderBase):
 
     @property
     def prefix(self):
-        return f"[{self.assets.state.esbuild_script}]" if self.assets.state.esbuild_script else "[esbuild]"
+        return (
+            f"[{self.assets.state.esbuild_script}]"
+            if self.assets.state.esbuild_script
+            else "[esbuild]"
+        )
 
     def start_dev_worker(self, exit_event, build_only=False, livereloader=None):
         process = super().start_dev_worker(exit_event, build_only, livereloader)
@@ -26,9 +30,7 @@ class EsbuildBuilder(BuilderBase):
     def get_dev_worker_command(self, build_only):
         if not self.assets.state.bundles:
             return None, None
-        return self.get_command(
-                    watch=not build_only, dev=True, metafile=self.metafile.name
-                )
+        return self.get_command(watch=not build_only, dev=True, metafile=self.metafile.name)
 
     def dev_worker_callback(self, build_only, livereloader):
         with self.assets.app.app_context():
@@ -103,9 +105,7 @@ class EsbuildBuilder(BuilderBase):
             "ESBUILD_METAFILE": metafile or "",
             "ESBUILD_SPLITTING": "1" if state.esbuild_splitting else "0",
             "ESBUILD_TARGET": ",".join(state.esbuild_target or []),
-            "ESBUILD_ALIASES": ";".join(
-                [f"{k}={v}" for k, v in state.esbuild_aliases.items()]
-            ),
+            "ESBUILD_ALIASES": ";".join([f"{k}={v}" for k, v in state.esbuild_aliases.items()]),
             "ESBUILD_EXTERNAL": ";".join(state.esbuild_external),
         }
 
@@ -172,9 +172,7 @@ class EsbuildBuilder(BuilderBase):
 
     def write_mapping_from_metafile(self, filename, out=None, merge=False):
         try:
-            inputs, mapping = self.convert_metafile(
-                filename
-            )
+            inputs, mapping = self.convert_metafile(filename)
         except json.JSONDecodeError:
             return False
         self.assets.write_mapping_file(mapping, out, merge)

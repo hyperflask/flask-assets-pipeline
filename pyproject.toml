@@ -9,8 +9,8 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
-    "flask>=3.0.0",
-    "watchdog>=6.0.0",
+    "flask~=3.0",
+    "watchdog~=6.0",
 ]
 
 [project.urls]

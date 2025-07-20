@@ -12,10 +12,12 @@ class TemplateBuilder(BuilderBase):
             click.echo("Extracting bundled assets from templates")
             self.extract_from_templates()
             current_app.jinja_env.auto_reload = True
-            
+
         if livereloader:
             # recompile templates when they are modified to immediately extract assets and trigger a rebuild
-            watch_template_folder = [os.path.join(current_app.root_path, current_app.template_folder)]
+            watch_template_folder = [
+                os.path.join(current_app.root_path, current_app.template_folder)
+            ]
             for bp in current_app.iter_blueprints():
                 if bp.template_folder:
                     watch_template_folder.append(os.path.join(bp.root_path, bp.template_folder))
@@ -23,7 +25,9 @@ class TemplateBuilder(BuilderBase):
             for path in watch_template_folder:
                 if os.path.exists(path):
                     livereloader.observer.schedule(
-                        TemplateCompilerHandler(path, self.assets.app, livereloader), path, recursive=True
+                        TemplateCompilerHandler(path, self.assets.app, livereloader),
+                        path,
+                        recursive=True,
                     )
 
     def build(self, mapping, ignore_assets):
@@ -40,7 +44,9 @@ class TemplateBuilder(BuilderBase):
             for template in loader.list_templates():
                 if os.path.splitext(template)[1].lower() in self.assets.state.inline_template_exts:
                     source = loader.get_source(env, template)[0]
-                    env.compile(source, template) # force the compilation so the extension parse() method is executed
+                    env.compile(
+                        source, template
+                    )  # force the compilation so the extension parse() method is executed
 
 
 class TemplateCompilerHandler(FileSystemEventHandler):
@@ -52,13 +58,18 @@ class TemplateCompilerHandler(FileSystemEventHandler):
     def on_modified(self, event):
         if not event.is_directory and os.path.abspath(event.src_path).startswith(self.path):
             tpl = os.path.relpath(event.src_path, self.path)
-            if os.path.splitext(tpl)[1].lower() not in self.app.extensions["assets"].inline_template_exts:
+            if (
+                os.path.splitext(tpl)[1].lower()
+                not in self.app.extensions["assets"].inline_template_exts
+            ):
                 return
             try:
                 with self.app.app_context():
                     try:
                         source = self.app.jinja_env.loader.get_source(self.app.jinja_env, tpl)[0]
-                        self.app.jinja_env.compile(source, tpl) # force the compilation so the extension parse() method is executed
+                        self.app.jinja_env.compile(
+                            source, tpl
+                        )  # force the compilation so the extension parse() method is executed
                     except TemplateNotFound:
                         # handle loaders that do weird stuff :)
                         for template in self.app.jinja_loader.list_templates():
@@ -68,4 +79,3 @@ class TemplateCompilerHandler(FileSystemEventHandler):
                     self.broker.ping()
             except:
                 raise
-

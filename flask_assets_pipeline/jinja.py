@@ -70,7 +70,7 @@ class AssetTagsExtension(Extension):
     @property
     def default_asset_tags(self):
         return AssetTagsStr()
-    
+
     def asset_tags(self, filename):
         return current_app.extensions["assets"].instance.tags(filename)
 
@@ -109,7 +109,7 @@ class InlineAssetExtension(Extension):
                 out.append(Token(lineno, "data", preval))
                 lineno += count_newlines(preval)
 
-            end_match = self.close_tag_re.search(token.value[open_match.end():])
+            end_match = self.close_tag_re.search(token.value[open_match.end() :])
             if not end_match:
                 raise TemplateSyntaxError(
                     f"unclosed {self.tags[0]} tag",
@@ -135,7 +135,11 @@ class InlineAssetExtension(Extension):
             )
 
             if open_match.end() + end_match.end() < len(token.value):
-                out.append(Token(block_end_lineno, "data", token.value[open_match.end() + end_match.end() :]))
+                out.append(
+                    Token(
+                        block_end_lineno, "data", token.value[open_match.end() + end_match.end() :]
+                    )
+                )
 
         return out
 

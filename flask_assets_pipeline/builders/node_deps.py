@@ -34,5 +34,9 @@ class NodeDependenciesBuilder(BuilderBase):
             )
 
     def copy_files_from_node_modules(self, files):
-        copy_files(files, self.assets.state.node_modules_path,
-                   self.assets.app.static_folder, self.assets.app.logger)
+        copy_files(
+            files,
+            self.assets.state.node_modules_path,
+            self.assets.app.static_folder,
+            self.assets.app.logger,
+        )

@@ -133,7 +133,7 @@ class AssetsPipeline:
         cache_worker_urls=None,
         cache_worker_filename="cache-worker.js",
         cache_worker_register=None,
-        with_jinja_ext=True
+        with_jinja_ext=True,
     ):
         bundles = app.config.get("ASSETS_BUNDLES", bundles)
         include = app.config.get("ASSETS_INCLUDE", include)
@@ -259,7 +259,16 @@ class AssetsPipeline:
         app.cli.add_command(assets_cli)
         self.builders = []
 
-    def bundle(self, assets, name=None, include=False, priority=1, from_package=None, assets_folder=None, output_folder=None):
+    def bundle(
+        self,
+        assets,
+        name=None,
+        include=False,
+        priority=1,
+        from_package=None,
+        assets_folder=None,
+        output_folder=None,
+    ):
         bundles = {}
         if isinstance(assets, dict):
             bundles = assets
@@ -269,8 +278,14 @@ class AssetsPipeline:
             bundles = {str(f): [f] for f in assets}
         for name, files in bundles.items():
             self.state.bundles[name] = [
-                f if isinstance(f, Entrypoint) or is_abs_url(f) else
-                Entrypoint.create(f, from_package=from_package, assets_folder=assets_folder, output_folder=output_folder)
+                f
+                if isinstance(f, Entrypoint) or is_abs_url(f)
+                else Entrypoint.create(
+                    f,
+                    from_package=from_package,
+                    assets_folder=assets_folder,
+                    output_folder=output_folder,
+                )
                 for f in files
             ]
         if include:
@@ -291,7 +306,11 @@ class AssetsPipeline:
         else:
             files = [f for files in self.state.bundles.values() for f in files]
         if entrypoints_only:
-            return [f if isinstance(f, Entrypoint) else Entrypoint.create(f) for f in files if not is_abs_url(f)]
+            return [
+                f if isinstance(f, Entrypoint) else Entrypoint.create(f)
+                for f in files
+                if not is_abs_url(f)
+            ]
         return files
 
     def include(self, path, priority=1):
@@ -315,7 +334,9 @@ class AssetsPipeline:
                 g.assets_map = mapping
         return mapping.get(filename, [filename])
 
-    def url(self, filename, with_meta=False, single=True, external=False, with_pre=False, resolve=True):
+    def url(
+        self, filename, with_meta=False, single=True, external=False, with_pre=False, resolve=True
+    ):
         r = re.compile("(defer )?(static|import|prefetch|modulepreload|preload( as [a-z]+)?) ")
         meta = {}
         if isinstance(filename, (tuple, list)):
@@ -351,28 +372,49 @@ class AssetsPipeline:
             else:
                 if not url.startswith("/"):
                     url = url_for(
-                        'static' if url_meta.get("modifier") == "static" else self.state.assets_endpoint,
+                        "static"
+                        if url_meta.get("modifier") == "static"
+                        else self.state.assets_endpoint,
                         filename=url,
                         _external=external if not self.state.cdn_enabled else False,
                     )
                 if self.state.cdn_enabled:
                     url = self.state.cdn_host + url
-            if not with_pre and url_meta.get("modifier") in ("prefetch", "preload", "modulepreload"):
+            if not with_pre and url_meta.get("modifier") in (
+                "prefetch",
+                "preload",
+                "modulepreload",
+            ):
                 continue
             urls[url] = url_meta
-            
+
         urls = list(urls.keys() if not with_meta else urls.items())
         return urls[0] if single else urls
 
     def urls(self, paths=None, with_meta=False, external=False, with_pre=False, resolve=True):
         if paths is None:
-            includes = g.include_assets if has_request_context() and 'include_assets' in g else self.state.include
+            includes = (
+                g.include_assets
+                if has_request_context() and "include_assets" in g
+                else self.state.include
+            )
             paths = [i[1] for i in sorted(includes, key=lambda i: i[0], reverse=True)]
         elif isinstance(paths, str):
             paths = [paths]
         urls = {}
         for f in paths:
-            urls.update(dict(self.url(f, with_meta=True, single=False, external=external, with_pre=with_pre, resolve=resolve)))
+            urls.update(
+                dict(
+                    self.url(
+                        f,
+                        with_meta=True,
+                        single=False,
+                        external=external,
+                        with_pre=with_pre,
+                        resolve=resolve,
+                    )
+                )
+            )
         return urls.items() if with_meta else list(urls.keys())
 
     def split_urls(self, paths=None, with_meta=False, external=False, resolve=True):
@@ -392,9 +434,11 @@ class AssetsPipeline:
     def tags(self, paths=None, external=False, with_pre=True, resolve=True):
         tags = []
         pre = []
-        for url, meta in self.urls(paths, with_meta=True, external=external, with_pre=with_pre, resolve=resolve):
+        for url, meta in self.urls(
+            paths, with_meta=True, external=external, with_pre=with_pre, resolve=resolve
+        ):
             attrs = "".join(
-                f' {k}' if v is True else f' {k}="{v}"'
+                f" {k}" if v is True else f' {k}="{v}"'
                 for k, v in meta.items()
                 if v and k not in ("modifier", "content_type")
             )
@@ -430,8 +474,10 @@ class AssetsPipeline:
 
     def add_route(self, endpoint, url, decorators=None, template=None, app=None, **options):
         app = app or self.app
+
         def view_func(*args, **kwargs):
             return render_template(template or self.state.route_template)
+
         if decorators:
             for decorator in decorators:
                 view_func = decorator(view_func)
@@ -490,7 +536,7 @@ class AssetsPipeline:
             ignore_files.append(self.state.tailwind)
 
         return copy_assets(src, dest, stamp, ignore_files, self.app.logger)
-    
+
     def load_builders(self):
         if self.builders:
             return self.builders
@@ -532,7 +578,7 @@ class AssetsPipeline:
         else:
             self.builders.append(builder)
         return builder
-    
+
     def get_builder(self, builder_class):
         for builder in self.load_builders():
             if isinstance(builder, builder_class):
@@ -540,13 +586,22 @@ class AssetsPipeline:
         builder = builder_class()
         builder.init(self)
         return builder
-    
+
     def register_cache_worker_route(self, url=None):
         def view_func():
-            resp = send_from_directory(self.state.output_folder, self.state.cache_worker_filename, mimetype="text/javascript")
+            resp = send_from_directory(
+                self.state.output_folder,
+                self.state.cache_worker_filename,
+                mimetype="text/javascript",
+            )
             resp.headers.add("Expires", 0)
             return resp
-        self.app.add_url_rule(url or f"/{self.state.cache_worker_filename}", endpoint="cache_service_worker", view_func=view_func)
+
+        self.app.add_url_rule(
+            url or f"/{self.state.cache_worker_filename}",
+            endpoint="cache_service_worker",
+            view_func=view_func,
+        )
 
 
 @dataclass
@@ -556,7 +611,9 @@ class Entrypoint:
     from_package: t.Optional[str] = None
 
     @classmethod
-    def create(cls, filename, outfile=None, from_package=None, assets_folder=None, output_folder=None):
+    def create(
+        cls, filename, outfile=None, from_package=None, assets_folder=None, output_folder=None
+    ):
         if "=" in filename:
             filename, outfile = filename.split("=", 1)
         if ":" in filename:
@@ -571,28 +628,30 @@ class Entrypoint:
         if output_folder:
             outfile = os.path.join(output_folder, outfile or filename)
         return cls(path, outfile, from_package)
-    
+
     @property
     def path(self):
         return f"{self.from_package}:{self.filename}" if self.from_package else self.filename
-    
+
     @property
     def is_abs(self):
         return self.from_package or os.path.isabs(self.filename)
-    
+
     def resolve_path(self, assets_folder=None):
         filename = self.filename
         if self.from_package == "jinja":
-            filename = current_app.jinja_env.loader.get_source(current_app.jinja_env, filename)[1] # resolve filename without compiling templates
+            filename = current_app.jinja_env.loader.get_source(current_app.jinja_env, filename)[
+                1
+            ]  # resolve filename without compiling templates
         elif self.from_package:
             filename = resolve_package_file(self.from_package, filename)
         elif not os.path.isabs(filename) and assets_folder:
             filename = os.path.join(assets_folder, filename)
         return filename
-    
+
     def __str__(self):
         return self.path
-    
+
     def __repr__(self):
         return f"{self.path}={self.outfile}" if self.outfile else self.path
 
