@@ -61,6 +61,11 @@ class Reloader:
 def create_reloader_app(reloader):
     app = Flask(__name__)
 
+    @app.after_request
+    def after_request(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+
     @app.route("/")
     def index():
         def stream():

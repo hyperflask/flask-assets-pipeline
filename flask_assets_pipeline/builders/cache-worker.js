@@ -23,6 +23,10 @@ self.addEventListener('activate', function(event) {
 });
 
 self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (url.host == "localhost:7878" || url.pathname.includes(".well-known/mercure")) {
+    return;
+  }
   event.respondWith(caches.match(event.request).then((response) => {
     return response || fetch(event.request);
   }));
