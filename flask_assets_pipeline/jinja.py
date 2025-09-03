@@ -84,6 +84,9 @@ class InlineAssetExtension(Extension):
             self.close_tag_re = re.compile(r"</\s*%s\s*>" % self.tags[0])
 
     def filter_stream(self, stream):
+        if not stream.name:
+            return stream
+        
         out = []
         for token in stream:
             if token.type != "data":
@@ -101,7 +104,7 @@ class InlineAssetExtension(Extension):
                 bundle = open_match.group(2)
             except IndexError:
                 bundle = None
-
+            
             filename = f"{os.path.splitext(stream.name)[0]}.{self.fileext}"
 
             if open_match.start() > 0:
