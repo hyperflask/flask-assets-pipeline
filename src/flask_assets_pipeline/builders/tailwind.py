@@ -1,7 +1,7 @@
 from ..builder import BuilderBase
 import subprocess
 import os
-import tempfile
+import re
 
 
 class TailwindBuilder(BuilderBase):
@@ -9,7 +9,15 @@ class TailwindBuilder(BuilderBase):
     matchline = "Done in"
 
     def start_dev_worker(self, exit_event, build_only=False, livereloader=None):
+        state = self.assets.state
         self.check_tailwind_setup()
+
+        if livereloader and (state.tailwind_expand_env_vars or state.tailwind_sources):
+            livereloader.observe(
+                os.path.join(state.assets_folder, state.tailwind),
+                callback=lambda e, b: self.expand_tailwind_file(),
+            )
+
         return super().start_dev_worker(exit_event, build_only, livereloader)
 
     def get_dev_worker_command(self, build_only):
@@ -34,14 +42,8 @@ class TailwindBuilder(BuilderBase):
 
     def get_command(self, watch=False, dev=False):
         state = self.assets.state
-        input = os.path.join(state.assets_folder, state.tailwind)
+        input = self.expand_tailwind_file()
         output = os.path.join(state.output_folder, state.tailwind)
-
-        if state.tailwind_expand_env_vars:
-            expanded = input + ".expanded.css"
-            with open(input) as fi, open(expanded, "w") as fo:
-                fo.write(os.path.expandvars(fi.read()))
-            input = expanded
 
         args = ["-i", input, "-o", output]
         if not dev:
@@ -55,6 +57,35 @@ class TailwindBuilder(BuilderBase):
             else [state.tailwind_bin, *args]
         )
         return cmd
+
+    def expand_tailwind_file(self):
+        state = self.assets.state
+        input = os.path.join(state.assets_folder, state.tailwind)
+        if not state.tailwind_expand_env_vars and not state.tailwind_sources:
+            return input
+        expanded = input + ".expanded.css"
+        with open(input) as fi, open(expanded, "w") as fo:
+            source = fi.read()
+            if state.tailwind_expand_env_vars:
+                source = os.path.expandvars(source)
+            if state.tailwind_sources:
+                source = self.expand_tailwind_sources(source)
+            fo.write(source)
+        return expanded
+
+    def expand_tailwind_sources(self, source):
+        state = self.assets.state
+        lines = source.split("\n")
+        insert_at = -1
+        # insert after the tailwind import
+        for i, line in enumerate(lines):
+            if re.match(r"^@import\s+\"tailwindcss\"", line):
+                insert_at = i + 1
+                break
+        for src in state.tailwind_sources:
+            lines.insert(insert_at, f'@source "{src}";')
+            insert_at += 1
+        return "\n".join(lines)
 
     def check_tailwind_setup(self):
         state = self.assets.state

@@ -49,6 +49,7 @@ class AssetsPipelineState:
     tailwind_args: t.Sequence[str]
     tailwind_bin: str
     tailwind_expand_env_vars: t.Sequence[str]
+    tailwind_sources: t.Sequence[str]
     node_modules_path: str
     copy_files_from_node_modules: t.Mapping[str, str]
     cdn_host: str
@@ -124,6 +125,7 @@ class AssetsPipeline:
         tailwind_args=None,
         tailwind_bin=["npx", "@tailwindcss/cli"],
         tailwind_expand_env_vars=None,
+        tailwind_sources=None,
         node_modules_path=None,
         copy_files_from_node_modules=None,
         cdn_host=None,
@@ -185,6 +187,7 @@ class AssetsPipeline:
             tailwind_args=app.config.get("ASSETS_TAILWIND_ARGS", tailwind_args) or [],
             tailwind_bin=app.config.get("ASSETS_TAILWIND_BIN", tailwind_bin),
             tailwind_expand_env_vars=app.config.get("ASSETS_TAILWIND_EXPAND_ENV_VARS", tailwind_expand_env_vars) or [],
+            tailwind_sources=app.config.get("ASSETS_TAILWIND_SOURCES", tailwind_sources) or [],
             node_modules_path=app.config.get("ASSETS_NODE_MODULES_PATH", node_modules_path) or os.environ.get("NODE_PATH", "node_modules"),
             copy_files_from_node_modules=app.config.get("ASSETS_COPY_FILES_FROM_NODE_MODULES", copy_files_from_node_modules) or {},
             cdn_host=app.config.get("ASSETS_CDN_HOST", cdn_host),

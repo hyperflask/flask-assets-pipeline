@@ -150,7 +150,7 @@ Files built using esbuild and tailwind will be generated in a dist folder in the
 > It is not recommended to build in production. You should build in a separate environment (eg: CI),
 > then generate a tarball (or any other deliverable, eg: docker image) that you ship to production.
 
-## Tailwind support
+## Tailwind (v4) support
 
 Flask-Assets-Pipeline can launch tailwind in the background at the same time as esbuild and build your css file.
 The output css file will be automatically included.
@@ -166,9 +166,8 @@ assets = AssetsPipeline(app, bundles=[
 If the input file is missing, it will be automatically generated.
 Make sure your tailwind input file lists the correct sources.
 
-> [!TIP]
-> Environment variables can be automatically expanded in your tailwind input file
-> using the configuration `ASSETS_TAILWIND_EXPAND_ENV_VARS=True`
+The extension can also automatically add sources and expand environment variables in your tailwind input file.
+Set `ASSETS_TAILWIND_EXPAND_ENV_VARS` to `True` or configure `ASSETS_TAILWIND_SOURCES`.
 
 ## Using a separate assets folder
 
@@ -179,7 +178,7 @@ When using a separate assets folder:
  - Always use `asset_url()` for your assets' urls
  - In development, the assets folder will be exposed and assets served directly from it
  - For production, you must call the build command
- - During the build, assets will be copied to the static folder with a hash in their filename (for cache busting)
+ - During the build, assets which are not part of bundles will be copied to the static folder with a hash in their filename (for cache busting)
 
 ```python
 assets = AssetsPipeline(app, bundles=['app.js'], assets_folder='assets')

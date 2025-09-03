@@ -23,13 +23,17 @@ new EventSource('http://localhost:%(livereload_port)s').addEventListener('change
 
 
 class ReloadHandler(FileSystemEventHandler):
-    def __init__(self, broker, filter=None):
+    def __init__(self, broker, filter=None, callback=None):
         self.broker = broker
         self.filter = filter
+        self.callback = callback
 
     def on_modified(self, event):
         if not self.filter or self.filter(event):
-            self.broker.ping()
+            if self.callback:
+                self.callback(event, self.broker)
+            else:
+                self.broker.ping()
 
 
 class Reloader:
@@ -39,8 +43,8 @@ class Reloader:
         self.observer = observer
         self.subscribers = []
 
-    def observe(self, path, filter=None, recursive=True):
-        self.observer.schedule(ReloadHandler(self, filter), path, recursive=recursive)
+    def observe(self, path, filter=None, callback=None, recursive=True):
+        self.observer.schedule(ReloadHandler(self, filter, callback), path, recursive=recursive)
 
     def subscribe(self):
         q = queue.Queue(maxsize=5)
