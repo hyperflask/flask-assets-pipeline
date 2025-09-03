@@ -19,6 +19,13 @@ class TailwindBuilder(BuilderBase):
         if livereloader:
             livereloader.ping()
 
+    def cleanup_after_dev_worker(self):
+        state = self.assets.state
+        if state.tailwind_expand_env_vars:
+            filename = os.path.join(state.assets_folder, f"{state.tailwind}.expanded.css")
+            if os.path.exists(filename):
+                os.remove(filename)
+
     def build(self, mapping, ignore_assets):
         self.check_tailwind_setup()
         cmd = self.get_command()
@@ -31,18 +38,16 @@ class TailwindBuilder(BuilderBase):
         output = os.path.join(state.output_folder, state.tailwind)
 
         if state.tailwind_expand_env_vars:
-            tmpfile = tempfile.NamedTemporaryFile(delete=False)
-            with open(input) as fi, tmpfile as fo:
+            expanded = input + ".expanded.css"
+            with open(input) as fi, open(expanded, "w") as fo:
                 fo.write(os.path.expandvars(fi.read()))
-            input = tmpfile.name
+            input = expanded
 
         args = ["-i", input, "-o", output]
         if not dev:
             args.append("--minify")
         if watch:
             args.append("--watch")
-        if state.tailwind_expand_env_vars:
-            args.extend(["--cwd", os.getcwd()])
         args.extend(state.tailwind_args)
         cmd = (
             state.tailwind_bin + args
