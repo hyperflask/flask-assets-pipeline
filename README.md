@@ -335,6 +335,14 @@ assets = AssetsPipeline(app, ..., esbuild_script="esbuild.mjs")
 
 Use the command `flask assets generate-esbuild-script` to generate a base script that shows you the env vars available.
 
+## Compatibility with CSP
+
+Common Content Security Policies prevents inline script to be executed. However, inline scripts are used for the live reloader and the cache worker.
+
+There is a mechanism to allow inline scripts via the used of a "nonce".
+
+You can provide a nonce like so: `{% asset_tags nonce="..." %}
+
 ## Configuration
 
 | Config key | Extension argument | Description | Default |

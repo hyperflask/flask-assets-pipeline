@@ -3,6 +3,7 @@ from jinja2.lexer import count_newlines
 from jinja2.lexer import Token
 from jinja2.exceptions import TemplateSyntaxError
 from jinja2.compiler import CodeGenerator as BaseCodeGenerator
+from jinja2.environment import Template as BaseTemplate, TemplateStream as BaseTemplateStream
 from jinja2 import nodes
 from flask import current_app
 import re
@@ -12,22 +13,23 @@ import os
 # We want our asset_tags directive to print tags once all code has been executed,
 # to make sure include_asset can be called from anywhere (even from includes)
 #
-# To achieve this, we use a combination of a custom Environment.concat, an override to CodeGenerator and an extension.
+# To achieve this, we use a combination of a custom Environment.concat and an override to CodeGenerator and an extension.
 #
-# 1. The extension first replaces the {% asset_tags %} directive with an ExtensionAttribute node.
+# 1. The extension first replaces the {% asset_tags %} directive with a call to an extension method that returns a special object.
 # 2. In our CodeGenerator override, we catch calls to this node and ensure that an unescaped yield statement is used.
 # 3. The AssetTagsExtension.asset_tags property returns an object that will be evaluated only when converted to string
 #    (when the template is finally concatanated all together which is the last step).
-# 4. Our custom Envrionment.concat will ensure that the result from the CodeGenerator is first transformed to list
-#    so the generator expression is fully evaluated, then converts all items to strings and finally joins them together.
+# 4. Our custom Environment.concat and TemplateStream will ensure that str is called on each item
 #
-# Note that they are drawbacks to this approach as streaming is not possible anymore
+# Note that they are drawbacks to this approach as it will not work with streaming templates
 
 
-def configure_environment(app, asset_tags=True, inline_assets=False):
+def configure_environment(app, asset_tags=True, inline_assets=False, defer_asset_tags=True):
     if asset_tags:
-        app.jinja_env.concat = env_concat
-        app.jinja_env.code_generator_class = CodeGenerator
+        if defer_asset_tags:
+            app.jinja_env.concat = env_concat
+            app.jinja_env.code_generator_class = CodeGenerator
+            app.jinja_env.template_class = Template
         app.jinja_env.add_extension(AssetTagsExtension)
     if inline_assets:
         app.jinja_env.app = app
@@ -42,19 +44,36 @@ def env_concat(items):
 class CodeGenerator(BaseCodeGenerator):
     def visit_Output(self, node, frame):
         if (
-            isinstance(node.nodes[0], nodes.ExtensionAttribute)
-            and node.nodes[0].identifier == "flask_assets_pipeline.jinja.AssetTagsExtension"
+            isinstance(node.nodes[0], nodes.Call)
+            and isinstance(node.nodes[0].node, nodes.ExtensionAttribute)
+            and node.nodes[0].node.identifier == "flask_assets_pipeline.jinja.AssetTagsExtension"
         ):
             # do not escape the output
             self.writeline("yield ")
-            self.visit_ExtensionAttribute(node.nodes[0], frame)
+            self.visit_Call(node.nodes[0], frame)
         else:
             super().visit_Output(node, frame)
 
 
-class AssetTagsStr:
+class TemplateStream(BaseTemplateStream):
+    def __init__(self, gen):
+        def strgen():
+            for item in gen:
+                yield str(item)
+        super().__init__(strgen())
+
+
+class Template(BaseTemplate):
+    def stream(self, *args, **kwargs):
+        return TemplateStream(self.generate(*args, **kwargs))
+
+
+class AssetTagsDeferredStr:
+    def __init__(self, value):
+        self.value = value
+
     def __str__(self):
-        return current_app.extensions["assets"].instance.head()
+        return self.value()
 
 
 class AssetTagsExtension(Extension):
@@ -62,17 +81,31 @@ class AssetTagsExtension(Extension):
 
     def parse(self, parser):
         lineno = next(parser.stream).lineno
-        if not parser.stream.current.test("block_end"):
-            args = [parser.parse_expression()]
-            return nodes.Output([self.call_method("asset_tags", args, lineno=lineno)])
-        return nodes.Output([self.attr("default_asset_tags")], lineno=lineno)
+        args, kwargs = self.parse_args(parser)
+        return nodes.Output([self.call_method("asset_tags", args, kwargs, lineno=lineno)])
+    
+    def parse_args(self, parser):
+        args = []
+        kwargs = []
+        require_comma = False
+        while parser.stream.current.type != "block_end":
+            if require_comma:
+                self.stream.expect("comma")
+            if parser.stream.current.type == "name" and parser.stream.look().type == "assign":
+                key = parser.stream.current.value
+                parser.stream.skip(2)
+                value = parser.parse_unary()
+                kwargs.append(nodes.Keyword(key, value, lineno=value.lineno))
+            else:
+                args.append(parser.parse_unary())
+            require_comma = True
 
-    @property
-    def default_asset_tags(self):
-        return AssetTagsStr()
+        return args, kwargs
 
-    def asset_tags(self, filename):
-        return current_app.extensions["assets"].instance.tags(filename)
+    def asset_tags(self, *args, **kwargs):
+        if args:
+            return current_app.extensions["assets"].instance.tags(*args, **kwargs)
+        return AssetTagsDeferredStr(lambda: current_app.extensions["assets"].instance.head(script_nonce=kwargs.get("nonce")))
 
 
 class InlineAssetExtension(Extension):

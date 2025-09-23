@@ -136,6 +136,7 @@ class AssetsPipeline:
         cache_worker_filename="cache-worker.js",
         cache_worker_register=None,
         with_jinja_ext=True,
+        jinja_defer_asset_tags=True,
     ):
         bundles = app.config.get("ASSETS_BUNDLES", bundles)
         include = app.config.get("ASSETS_INCLUDE", include)
@@ -243,7 +244,7 @@ class AssetsPipeline:
 
         self.map_exposed_node_packages()
 
-        configure_environment(app, asset_tags=with_jinja_ext, inline_assets=state.inline)
+        configure_environment(app, asset_tags=with_jinja_ext, inline_assets=state.inline, defer_asset_tags=jinja_defer_asset_tags)
 
         @app.before_request
         def before_request():
@@ -461,7 +462,7 @@ class AssetsPipeline:
                 tags.append('<script src="%s"%s></script>' % (url, attrs))
         return Markup("\n".join(pre + tags))
 
-    def head(self):
+    def head(self, script_nonce=None):
         tags = []
         if self.state.import_map:
             tags.append(
@@ -469,10 +470,12 @@ class AssetsPipeline:
                 % json.dumps({"imports": self.state.import_map})
             )
         tags.append(self.tags())
+        if (self.state.cache_worker_register or self.app.debug) and callable(script_nonce):
+            script_nonce = script_nonce()
         if self.state.cache_worker_register:
-            tags.append(CACHE_WORKER_SCRIPT % {"worker_url": url_for("cache_service_worker")})
+            tags.append(CACHE_WORKER_SCRIPT % {"nonce": script_nonce or "", "worker_url": url_for("cache_service_worker")})
         if self.app.debug:
-            tags.append(LIVERELOAD_SCRIPT % {"livereload_port": self.state.livereload_port})
+            tags.append(LIVERELOAD_SCRIPT % {"nonce": script_nonce or "", "livereload_port": self.state.livereload_port})
         return Markup("\n".join(tags))
 
     def add_route(self, endpoint, url, decorators=None, template=None, app=None, **options):

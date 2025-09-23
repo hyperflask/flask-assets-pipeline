@@ -8,7 +8,7 @@ import logging
 
 
 LIVERELOAD_SCRIPT = """
-<script>
+<script nonce="%(nonce)s">
 let livereloadTimeout;
 new EventSource('http://localhost:%(livereload_port)s').addEventListener('change', () => {
     if (livereloadTimeout) {

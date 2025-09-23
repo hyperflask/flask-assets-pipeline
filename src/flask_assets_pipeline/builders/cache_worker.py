@@ -5,7 +5,7 @@ import uuid
 
 
 CACHE_WORKER_SCRIPT = """
-<script>
+<script nonce="%(nonce)s">
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('%(worker_url)s');
 }
