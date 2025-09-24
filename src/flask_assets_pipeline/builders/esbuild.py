@@ -6,7 +6,7 @@ import json
 
 
 class EsbuildBuilder(BuilderBase):
-    matchline = "\[watch\] build finished"
+    matchline = r"\[watch\] build finished"
     merge_metafile = False
 
     def init(self, assets):
