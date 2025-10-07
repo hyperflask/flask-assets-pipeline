@@ -256,8 +256,8 @@ class AssetsPipeline:
 
         app.jinja_env.globals.update(
             include_asset=include_asset,
-            asset_url=self.url,
-            static_url=lambda f, **kw: url_for("static", filename=f, **kw),
+            asset_url=asset_url,
+            static_url=static_url,
         )
 
         app.cli.add_command(assets_cli)
@@ -339,7 +339,7 @@ class AssetsPipeline:
         return mapping.get(filename, [filename])
 
     def url(
-        self, filename, with_meta=False, single=True, external=False, with_pre=False, resolve=True
+        self, filename, with_meta=False, single=True, external=False, with_pre=False, resolve=True, scheme=None,
     ):
         r = re.compile("(defer )?(static|import|prefetch|modulepreload|preload( as [a-z]+)?) ")
         meta = {}
@@ -381,6 +381,7 @@ class AssetsPipeline:
                         else self.state.assets_endpoint,
                         filename=url,
                         _external=external if not self.state.cdn_enabled else False,
+                        _scheme=scheme,
                     )
                 if self.state.cdn_enabled:
                     url = self.state.cdn_host + url
@@ -660,8 +661,21 @@ class Entrypoint:
 
     def __repr__(self):
         return f"{self.path}={self.outfile}" if self.outfile else self.path
-
+    
 
 def resolve_package_file(package, filename):
     m = importlib.import_module(package)
     return os.path.join(os.path.dirname(m.__file__), filename)
+
+
+def asset_url(filename, _external=False, _scheme=None, _anchor=None, **values):
+    url = current_app.extensions["assets"].instance.url(filename, external=_external, scheme=_scheme)
+    if values:
+        url = f"{url}?{urllib.parse.urlencode(values)}"
+    if _anchor:
+        url = f"{url}#{_anchor}"
+    return url
+
+
+def static_url(filename, **kwargs):
+    return url_for("static", filename=filename, **kwargs)

@@ -1,6 +1,6 @@
 [project]
 name = "flask-assets-pipeline"
-version = "0.7.0"
+version = "0.7.1"
 description = "Modern asset pipeline for Flask"
 authors = [
     {"name" = "Maxime Bouroumeau-Fuseau", email = "maxime.bouroumeau@gmail.com"}
