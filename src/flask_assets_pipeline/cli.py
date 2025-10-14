@@ -81,13 +81,6 @@ def build():
     for builder in state.instance.load_builders():
         builder.build(mapping, ignore_assets)
 
-    if state.assets_folder != current_app.static_folder:
-        assets = state.instance.copy_assets_to_static(ignore_files=ignore_assets)
-        for src, dest in assets.items():
-            if dest.endswith(".js"):
-                dest = [dest, {"map_as": src}]
-            mapping[src] = [dest]
-
     state.instance.write_mapping_file(mapping)
 
 

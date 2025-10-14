@@ -8,6 +8,7 @@ Modern assets pipeline for Flask.
  - Compatible with #nobuild leveraging [import maps](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script/type/importmap)
  - Extract inline scripts and styles from templates and bundle them properly
  - CDN support
+ - Images optimization and resizing
 
 ## Installation
 
@@ -139,6 +140,7 @@ This will:
  - build your bundles using esbuild
  - build your css with tailwind if enabled
  - minify files and not produce source maps
+ - optionally, copy static files from the assets folder to the static folder and stamp them
  - generate a mapping file (default: assets.json)
 
 Files built using esbuild and tailwind will be generated in a dist folder in the static directory.
@@ -315,6 +317,41 @@ assets = AssetsPipeline(app, ..., cdn_host="https://xxx.cloudfront.net")
 
 You can control when the cdn is used or not using the ASSETS_CDN_ENABLED config option (it will override the default behavior).
 
+## Processing images
+
+> [!WARNING]
+> You must install pillow for this feature to be available
+
+To activate image processing, you must either:
+
+- use a separate assets folder
+- define an images folder using `ASSETS_IMAGES_FOLDER` (relative to the static dir)
+
+The extension can:
+
+- save images dimensions as part of the mapping file
+- convert images to webp
+- optimize images (keeping their original format)
+- resize images to various width for responsive images
+- generate a blurry placeholder
+
+Generate an image tag attributes using the metadata saved as part of the mapping file. Use `flask_assets_pipeline.image_attrs()` or `asset_image_attrs()` in templates.
+
+```python
+assets = AssetsPipeline(app, ..., assets_folder="assets", webp_images=True, resize_images=[400])
+```
+
+```jinja
+<img {{asset_image_attrs('image.png')}}>
+```
+
+Will result in:
+
+```html
+<img src="/static/dist/img/image.webp" width="800" height="600" srcset="/static/dist/img/image-400.webp 400w"
+    style="background: url('data:image/webp;base64,...') center center / cover no-repeat;">
+```
+
 ## Cache service worker
 
 A [service worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers) to cache assets files locally can be automatically generated. It will include all bundled assets. This is particularly useful for [PWAs](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps).
@@ -341,26 +378,29 @@ Common Content Security Policies prevents inline script to be executed. However,
 
 There is a mechanism to allow inline scripts via the used of a "nonce".
 
-You can provide a nonce like so: `{% asset_tags nonce="..." %}
+You can provide a nonce like so: `{% asset_tags(nonce="...") %}
 
 ## Configuration
+
+### Core
 
 | Config key | Extension argument | Description | Default |
 | --- | --- | --- | --- |
 | ASSETS_BUNDLES | bundles | List of assets to build | |
 | ASSETS_INCLUDE | include | List of assets to include in your page | All assets in bundles |
-| ASSETS_ROUTE_TEMPLATE | route_template | The template to use for frontend routes | frontend_route.html |
-| ASSETS_INLINE | inline | Whether to extract assets from templates | False |
-| ASSETS_INCLUDE_INLINE_ON_DEMAND | include_inline_on_demand | Whether to only include inline assets when the template is used | False |
-| ASSETS_INLINE_TEMPLATE_EXTS | inline_template_exts | File extensions to process when looking for templates | .html .jinja |
 | ASSETS_IMPORT_MAP | import_map | ES Modules import map | {} |
-| ASSETS_EXPOSE_NODE_PACKAGES | expose_node_packages | Node packages to expose to the frontend via the import map | [] |
 | ASSETS_FOLDER | assets_folder | Search path for asset files | The app static_folder |
-| ASSETS_URL_PATH | assets_url_path | Base URL for the assets endpoint when in debug mode | /static/assets |
+| ASSETS_BUNDLE_OUTPUT_FOLDER | bundle_output_folder | The output folder for bundled files relative to the static folder | dist |
+| ASSETS_STATIC_OUTPUT_FOLDER | static_output_folder | The output folder for static files copied from the assets folder | |
 | ASSETS_STAMP | stamp_assets | Whether to stamp filenames with the file's hash when copying files from the assets folder to the static folder | True |
-| ASSETS_OUTPUT_FOLDER | output_folder | The output folder for bundled files relative to the static folder | dist |
-| ASSETS_OUTPUT_URL | output_url | Base url for outputted file | /static/dist |
+| ASSETS_ROUTE_TEMPLATE | route_template | The template to use for frontend routes | frontend_route.html |
 | ASSETS_MAPPING_FILE | mapping_file | Location of the mapping file to resolve assets filename to their built equivalent | assets.json |
+| ASSETS_LIVERELOAD_PORT | livereload_port | Port onto which to start the livereloading server | 8000 |
+
+### Esbuild
+
+| Config key | Extension argument | Description | Default |
+| --- | --- | --- | --- |
 | ASSETS_ESBUILD_SCRIPT | esbuild_script | Use a custom script calling esbuild insteaf of esbuild's cli | |
 | ASSETS_ESBUILD_ARGS | esbuild_args | Additional esbuild arguments | [] |
 | ASSETS_ESBUILD_BIN | esbuild_bin | esbuild binary location | npx esbuild |
@@ -368,15 +408,54 @@ You can provide a nonce like so: `{% asset_tags nonce="..." %}
 | ASSETS_ESBUILD_TARGET | esbuild_target | Set the target option for esbuild (use a list) | [] |
 | ASSETS_ESBUILD_ALIASES | esbuild_aliases | Esbuild aliases | {} |
 | ASSETS_ESBUILD_EXTERNAL | esbuild_external | Esbuild external imports | [] |
-| ASSETS_LIVERELOAD_PORT | livereload_port | Port onto which to start the livereloading server | 8000 |
+
+### Tailwind
+
+| Config key | Extension argument | Description | Default |
+| --- | --- | --- | --- |
 | ASSETS_TAILWIND | tailwind | Tailwind input css file | |
 | ASSETS_TAILWIND_ARGS | tailwind_args | Additional tailwind arguments | [] |
 | ASSETS_TAILWIND_BIN | tailwind_bin | tailwindcss binary location | npx tailwindcss |
 | ASSETS_TAILWIND_EXPAND_ENV_VARS | tailwind_expand_env_vars | Whether to expand env vars in tailwind input file | False |
-| ASSETS_NODE_MODULES_PATH | node_modules_path | Path to the node_modules directory | node_modules |
-| ASSETS_COPY_FILES_FROM_NODE_MODULES | copy_files_from_node_modules | Mapping of src/dest files to copy from node modules | {} |
+
+### Inline assets
+
+| Config key | Extension argument | Description | Default |
+| --- | --- | --- | --- |
+| ASSETS_INLINE | inline | Whether to extract assets from templates | False |
+| ASSETS_INCLUDE_INLINE_ON_DEMAND | include_inline_on_demand | Whether to only include inline assets when the template is used | False |
+| ASSETS_INLINE_TEMPLATE_EXTS | inline_template_exts | File extensions to process when looking for templates | .html .jinja |
+
+### CDN
+
+| Config key | Extension argument | Description | Default |
+| --- | --- | --- | --- |
 | ASSETS_CDN_HOST | cdn_host | CDN hostname |  |
 | ASSETS_CDN_ENABLED | cdn_enabled | Whether to use the cdn | True in prod if cdn_host is set |
+
+### Images
+
+| Config key | Extension argument | Description | Default |
+| --- | --- | --- | --- |
+| ASSETS_IMAGES_FOLDER | images_folder | Folder relative to static dir when a separate assets folder is not used |
+| ASSETS_IMAGES_OUTPUT_FOLDER | images_output_folder | Folder relative to static dir where processed images are saved | dist/img
+| ASSETS_RESIZE_IMAGES | resize_images | True for default set of sizes or a list of width in pixels | False
+| ASSETS_OPTIMIZE_IMAGES | optimize_images | Whether to optimize all images | False
+| ASSETS_WEBP_IMAGES | webp_images | Whether to convert images to Webp | False
+| ASSETS_IMAGE_PLACEHOLDER | image_placeholder | Compute a placeholder data URI for images | True
+
+### Node packages
+
+| Config key | Extension argument | Description | Default |
+| --- | --- | --- | --- |
+| ASSETS_EXPOSE_NODE_PACKAGES | expose_node_packages | Node packages to expose to the frontend via the import map | [] |
+| ASSETS_NODE_MODULES_PATH | node_modules_path | Path to the node_modules directory | node_modules |
+| ASSETS_COPY_FILES_FROM_NODE_MODULES | copy_files_from_node_modules | Mapping of src/dest files to copy from node modules | {} |
+
+### Cache worker
+
+| Config key | Extension argument | Description | Default |
+| --- | --- | --- | --- |
 | ASSETS_CACHE_WORKER | cache_worker | Whether to generate and register a cache service worker (useful for PWAs) | False |
 | ASSETS_CACHE_WORKER_NAME | cache_worker_name | Name of the cache | Random |
 | ASSETS_CACHE_WORKER_URLS | cache_worker_urls | Additional urls to cache | [] |

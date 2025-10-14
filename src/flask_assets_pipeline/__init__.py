@@ -10,14 +10,23 @@ import importlib
 from .cli import assets_cli
 from .jinja import configure_environment
 from .livereload import LIVERELOAD_SCRIPT
-from .utils import copy_assets, is_abs_url
-from .builder import BuilderBase
+from .builders.base import BuilderBase
 from .builders.node_deps import NodeDependenciesBuilder
 from .builders.templates import TemplateBuilder
 from .builders.esbuild import EsbuildBuilder
 from .builders.tailwind import TailwindBuilder
 from .builders.cache_worker import CacheServiceWorkerBuilder, CACHE_WORKER_SCRIPT
+from .builders.static import StaticAssetsBuilder
+from .file_processors import ProcessorDispatcher
+from .file_processors.image import (ImageResizer, DEFAULT_IMAGE_SIZES, ImageMeta, ImageConverter,
+                                    ImageOptimizer, ImageProcessorChain, ImagePlaceholder)
+from .image import image_attrs, image_attrs_html
 
+try:
+    import PIL
+except ImportError:
+    PIL = None
+    
 
 @dataclass
 class AssetsPipelineState:
@@ -31,10 +40,11 @@ class AssetsPipelineState:
     expose_node_packages: t.Sequence[str]
     assets_folder: str
     assets_endpoint: str
-    assets_url_path: str
     stamp_assets: bool
-    output_folder: str
-    output_url: str
+    bundle_output_folder: str
+    bundle_output_url: str
+    static_output_folder: str
+    static_output_url: str
     mapping_file: str
     esbuild_script: str
     esbuild_cache_metafile: bool
@@ -59,6 +69,13 @@ class AssetsPipelineState:
     cache_worker_urls: t.Sequence[str]
     cache_worker_filename: str
     cache_worker_register: bool
+    images_folder: t.Optional[str]
+    images_output_folder: str
+    images_output_url: str
+    optimize_images: bool
+    resize_images: t.Optional[t.Sequence[int]]
+    webp_images: bool
+    image_placeholder: bool
     mapping: t.Mapping[str, t.Sequence[str]]
     watch_template_folders: t.Sequence[str]
     builders: t.Sequence[t.Type[BuilderBase]]
@@ -91,6 +108,8 @@ PRELOAD_AS_EXT_MAPPING = {
 
 
 class AssetsPipeline:
+    state: AssetsPipelineState
+
     def __init__(self, app=None, **kwargs):
         if app:
             self.init_app(app, **kwargs)
@@ -107,10 +126,9 @@ class AssetsPipeline:
         import_map=None,
         expose_node_packages=None,
         assets_folder=None,
-        assets_url_path="/static/assets",
         stamp_assets=True,
-        output_folder=None,
-        output_url=None,
+        bundle_output_folder="dist",
+        static_output_folder=None,
         mapping_file="assets.json",
         esbuild_script=None,
         esbuild_cache_metafile=None,
@@ -135,28 +153,29 @@ class AssetsPipeline:
         cache_worker_urls=None,
         cache_worker_filename="cache-worker.js",
         cache_worker_register=None,
+        images_folder=None,
+        images_output_folder="dist/img",
+        optimize_images=False,
+        resize_images=None,
+        webp_images=False,
+        image_placeholder=True,
         with_jinja_ext=True,
         jinja_defer_asset_tags=True,
+        debug_static_assets_url="/static/_assets"
     ):
         bundles = app.config.get("ASSETS_BUNDLES", bundles)
         include = app.config.get("ASSETS_INCLUDE", include)
         assets_folder = app.config.get("ASSETS_FOLDER", assets_folder)
-        output_folder = app.config.get("ASSETS_OUTPUT_FOLDER", output_folder)
-        output_url = app.config.get("ASSETS_OUTPUT_URL", output_url)
+        bundle_output_folder = app.config.get("ASSETS_BUNDLE_OUTPUT_FOLDER", bundle_output_folder)
+        static_output_folder = app.config.get("ASSETS_STATIC_OUTPUT_FOLDER", static_output_folder)
         mapping_file = app.config.get("ASSETS_MAPPING_FILE", mapping_file)
         esbuild_cache_metafile = app.config.get("ASSETS_ESBUILD_CACHE_METAFILE", esbuild_cache_metafile)  # fmt: skip
         cdn_enabled = app.config.get("ASSETS_CDN_ENABLED", cdn_enabled)
-
-        if assets_folder is None:
-            assets_folder = app.static_folder
-        else:
-            assets_folder = os.path.join(app.root_path, assets_folder)
-        if not output_folder:
-            output_folder = os.path.join(app.static_folder, "dist")
-        else:
-            output_folder = os.path.join(app.root_path, output_folder)
-        if not output_url:
-            output_url = f"{app.static_url_path}/dist"
+        images_folder = app.config.get("ASSETS_IMAGES_FOLDER", images_folder)
+        images_output_folder = app.config.get("ASSETS_OUTPUT_FOLDER", images_output_folder)
+        resize_images = app.config.get("ASSETS_RESIZE_IMAGES", resize_images)
+        if resize_images is True:
+            resize_images = DEFAULT_IMAGE_SIZES
 
         self.app = app
         state = self.state = AssetsPipelineState(
@@ -168,12 +187,13 @@ class AssetsPipeline:
             inline_template_exts=app.config.get("ASSETS_INLINE_TEMPLATE_EXTS", inline_template_exts) or [],
             import_map=app.config.get("ASSETS_IMPORT_MAP", import_map) or {},
             expose_node_packages=app.config.get("ASSETS_EXPOSE_NODE_PACKAGES", expose_node_packages) or [],
-            assets_folder=assets_folder,
+            assets_folder=os.path.join(app.root_path, assets_folder) if assets_folder else app.static_folder,
             assets_endpoint="static",
-            assets_url_path=app.config.get("ASSETS_URL_PATH", assets_url_path),
             stamp_assets=app.config.get("ASSETS_STAMP", stamp_assets),
-            output_folder=output_folder,
-            output_url=output_url,
+            bundle_output_folder=os.path.join(app.static_folder, bundle_output_folder) if bundle_output_folder else app.static_folder,
+            bundle_output_url=f"{app.static_url_path}/{bundle_output_folder}" if bundle_output_folder else app.static_url_path,
+            static_output_folder=os.path.join(app.static_folder, static_output_folder) if static_output_folder else app.static_folder,
+            static_output_url=f"{app.static_url_path}/{static_output_folder}" if static_output_folder else app.static_url_path,
             mapping_file=os.path.join(app.root_path, mapping_file),
             esbuild_script=app.config.get("ASSETS_ESBUILD_SCRIPT", esbuild_script),
             esbuild_cache_metafile=not app.debug if esbuild_cache_metafile is None else esbuild_cache_metafile,
@@ -198,6 +218,13 @@ class AssetsPipeline:
             cache_worker_urls=app.config.get("ASSETS_CACHE_WORKER_URLS", cache_worker_urls) or [],
             cache_worker_filename=app.config.get("ASSETS_CACHE_WORKER_FILENAME", cache_worker_filename),
             cache_worker_register=app.config.get("ASSETS_CACHE_WORKER_REGISTER", cache_worker_register),
+            images_folder=os.path.join(app.root_path, images_folder) if images_folder else None,
+            images_output_folder=os.path.join(app.static_folder, images_output_folder) if images_output_folder else app.static_folder,
+            images_output_url=f"{app.static_url_path}/{images_output_folder}" if images_output_folder else app.static_url_path,
+            optimize_images=app.config.get("ASSETS_OPTIMIZE_IMAGES", optimize_images),
+            resize_images=resize_images,
+            webp_images=app.config.get("ASSETS_WEBP_IMAGES", webp_images),
+            image_placeholder=app.config.get("ASSETS_IMAGE_PLACEHOLDER", image_placeholder),
             mapping={},
             watch_template_folders=[],
             builders=[],
@@ -222,7 +249,7 @@ class AssetsPipeline:
         if include:
             self.include(include)
         if state.tailwind:
-            self.include(f"{state.output_url}/{state.tailwind}")
+            self.include(f"{state.bundle_output_url}/{state.tailwind}")
 
         if not state.cdn_host:
             state.cdn_enabled = False
@@ -234,13 +261,29 @@ class AssetsPipeline:
         if separate_assets_folder and app.debug:
             # in debug mode, no need to copy assets to static, we serve them directly
             app.add_url_rule(
-                f"{state.assets_url_path}/<path:filename>",
+                f"{debug_static_assets_url}/<path:filename>",
                 endpoint="assets",
                 view_func=lambda filename: send_from_directory(
                     state.assets_folder, filename, max_age=app.get_send_file_max_age(filename)
                 ),
             )
             state.assets_endpoint = "assets"
+
+        self.image_processor = ImageProcessorChain([ImageMeta()])
+        if state.webp_images:
+            self.image_processor.processors.append(ImageConverter("webp"))
+        elif state.optimize_images:
+            self.image_processor.processors.append(ImageOptimizer())
+        if state.resize_images:
+            self.image_processor.processors.append(ImageResizer(state.resize_images, target_ext="webp"))
+        if state.image_placeholder:
+            self.image_processor.processors.append(ImagePlaceholder())
+
+        self.static_assets_file_processor = ProcessorDispatcher()
+        if PIL:
+            self.static_assets_file_processor.add("mime:image", self.image_processor)
+        elif len(self.image_processor.processors) > 1:
+            app.logger.warning("Pillow not installed, image processing disabled")
 
         self.map_exposed_node_packages()
 
@@ -258,6 +301,7 @@ class AssetsPipeline:
             include_asset=include_asset,
             asset_url=asset_url,
             static_url=static_url,
+            asset_image_attrs=image_attrs_html,
         )
 
         app.cli.add_command(assets_cli)
@@ -328,27 +372,29 @@ class AssetsPipeline:
                 assets.append([priority, p])
 
     def resolve_asset_filename_to_url(self, filename):
-        if has_request_context() and "assets_map" in g:
-            mapping = g.assets_map
+        if self.app.debug:
+            if has_request_context() and "assets_map" in g:
+                mapping = g.assets_map
+            else:
+                mapping = self.read_mapping()
+                if has_request_context():
+                    g.assets_map = mapping
         else:
             mapping = self.state.mapping
-            if self.app.debug:
-                mapping = self.read_mapping()
-            if has_request_context():
-                g.assets_map = mapping
         return mapping.get(filename, [filename])
+    
+    url_modifier_regexp = re.compile(r"(defer\s+)?(static|import|prefetch|modulepreload|preload(\s+as\s+[a-z]+)?)\s+")
 
     def url(
         self, filename, with_meta=False, single=True, external=False, with_pre=False, resolve=True, scheme=None,
     ):
-        r = re.compile("(defer )?(static|import|prefetch|modulepreload|preload( as [a-z]+)?) ")
         meta = {}
         if isinstance(filename, (tuple, list)):
             filename, meta = filename
             if not isinstance(meta, dict):
                 meta = {"modifier": meta}
         else:
-            m = r.match(filename)
+            m = self.url_modifier_regexp.match(filename)
             if m:
                 if m.group(1):
                     meta["defer"] = True
@@ -511,7 +557,7 @@ class AssetsPipeline:
         for name in self.state.expose_node_packages:
             if ":" in name:
                 name, _ = name.split(":", 1)
-            self.map_import(name, f"{self.state.output_url}/vendor/{name}.js")
+            self.map_import(name, f"{self.state.bundle_output_url}/vendor/{name}.js")
 
     def read_mapping(self):
         try:
@@ -520,29 +566,16 @@ class AssetsPipeline:
         except Exception:
             return {}
 
-    def write_mapping_file(self, mapping, out=None, merge=False):
+    def write_mapping_file(self, mapping, out=None, merge=None):
         if not out:
             out = self.state.mapping_file
-        with open(out, "rw" if merge else "w") as f:
-            if merge:
+        if merge is None:
+            merge = self.app.debug
+        if merge and os.path.exists(out):
+            with open(out, "r") as f:
                 mapping = dict(json.load(f), **mapping)
+        with open(out, "w") as f:
             json.dump(mapping, f, indent=2)
-
-    def copy_assets_to_static(self, src=None, dest=None, stamp=None, ignore_files=None):
-        if src is None:
-            src = self.state.assets_folder
-        if dest is None:
-            dest = self.app.static_folder
-        if stamp is None:
-            stamp = self.state.stamp_assets
-
-        ignore_files = ignore_files or []
-        for files in self.state.bundles.values():
-            ignore_files.extend(files)
-        if self.state.tailwind:
-            ignore_files.append(self.state.tailwind)
-
-        return copy_assets(src, dest, stamp, ignore_files, self.app.logger)
 
     def load_builders(self):
         if self.builders:
@@ -556,6 +589,10 @@ class AssetsPipeline:
             builtins.append(TailwindBuilder())
         if self.state.cache_worker:
             builtins.append(CacheServiceWorkerBuilder())
+        if self.state.assets_folder != self.app.static_folder:
+            builtins.append(StaticAssetsBuilder(self.state.assets_folder, self.state.static_output_folder, self.state.static_output_url))
+        elif self.state.images_folder:
+            builtins.append(StaticAssetsBuilder(self.state.images_folder, self.state.images_output_folder, self.state.images_output_url))
         for builder in builtins + self.state.builders:
             self.load_builder(builder)
         return self.builders
@@ -597,7 +634,7 @@ class AssetsPipeline:
     def register_cache_worker_route(self, url=None):
         def view_func():
             resp = send_from_directory(
-                self.state.output_folder,
+                self.state.bundle_output_folder,
                 self.state.cache_worker_filename,
                 mimetype="text/javascript",
             )
@@ -609,6 +646,12 @@ class AssetsPipeline:
             endpoint="cache_service_worker",
             view_func=view_func,
         )
+
+    def static_asset_file_processor(self, pattern):
+        def decorator(fn):
+            self.static_assets_file_processor.add(pattern, fn)
+            return fn
+        return decorator
 
 
 @dataclass
@@ -679,3 +722,7 @@ def asset_url(filename, _external=False, _scheme=None, _anchor=None, **values):
 
 def static_url(filename, **kwargs):
     return url_for("static", filename=filename, **kwargs)
+
+
+def is_abs_url(path):
+    return re.match("([a-z]+:)?//", path) if isinstance(path, str) else False

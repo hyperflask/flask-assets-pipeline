@@ -20,8 +20,6 @@ import os
 # 3. The AssetTagsExtension.asset_tags property returns an object that will be evaluated only when converted to string
 #    (when the template is finally concatanated all together which is the last step).
 # 4. Our custom Environment.concat and TemplateStream will ensure that str is called on each item
-#
-# Note that they are drawbacks to this approach as it will not work with streaming templates
 
 
 def configure_environment(app, asset_tags=True, inline_assets=False, defer_asset_tags=True):
@@ -81,26 +79,12 @@ class AssetTagsExtension(Extension):
 
     def parse(self, parser):
         lineno = next(parser.stream).lineno
-        args, kwargs = self.parse_args(parser)
+        if parser.stream.current.type == "lparen":
+            args, kwargs, _, __ = parser.parse_call_args()
+        else:
+            args = []
+            kwargs = {}
         return nodes.Output([self.call_method("asset_tags", args, kwargs, lineno=lineno)])
-    
-    def parse_args(self, parser):
-        args = []
-        kwargs = []
-        require_comma = False
-        while parser.stream.current.type != "block_end":
-            if require_comma:
-                self.stream.expect("comma")
-            if parser.stream.current.type == "name" and parser.stream.look().type == "assign":
-                key = parser.stream.current.value
-                parser.stream.skip(2)
-                value = parser.parse_unary()
-                kwargs.append(nodes.Keyword(key, value, lineno=value.lineno))
-            else:
-                args.append(parser.parse_unary())
-            require_comma = True
-
-        return args, kwargs
 
     def asset_tags(self, *args, **kwargs):
         if args:

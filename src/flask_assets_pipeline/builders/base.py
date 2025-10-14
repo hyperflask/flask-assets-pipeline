@@ -1,3 +1,4 @@
+from flask import Flask
 import subprocess
 import click
 import threading
@@ -10,8 +11,16 @@ class BuilderBase:
     matchline = None
     dev_worker_callback = None
 
-    def init(self, assets):
-        self.assets = assets
+    def init(self, ext):
+        self.ext = ext
+
+    @property
+    def app(self) -> Flask:
+        return self.ext.app
+
+    @property
+    def state(self):
+        return self.ext.state
 
     def start_dev_worker(self, exit_event, build_only=False, livereloader=None):
         args, env = self.get_dev_worker_command(build_only)

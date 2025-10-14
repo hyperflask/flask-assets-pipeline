@@ -1,4 +1,4 @@
-from ..builder import BuilderBase
+from .base import BuilderBase
 import os
 import json
 import uuid
@@ -15,16 +15,16 @@ if ('serviceWorker' in navigator) {
 
 class CacheServiceWorkerBuilder(BuilderBase):
     def build(self, mapping, ignore_assets):
-        urls = self.assets.urls(
+        urls = self.ext.urls(
             [f for m in mapping.values() for f in m], with_pre=True, resolve=False
         )
-        if self.assets.state.tailwind:
-            urls.append(f"{self.assets.state.output_url}/{self.assets.state.tailwind}")
-        urls.extend(self.assets.state.cache_worker_urls)
-        cache_name = self.assets.state.cache_worker_name or f"assets-{str(uuid.uuid4())[0:8]}"
+        if self.state.tailwind:
+            urls.append(f"{self.state.bundle_output_url}/{self.state.tailwind}")
+        urls.extend(self.state.cache_worker_urls)
+        cache_name = self.state.cache_worker_name or f"assets-{str(uuid.uuid4())[0:8]}"
         out = self.generate(cache_name, urls)
         filename = os.path.join(
-            self.assets.state.output_folder, self.assets.state.cache_worker_filename
+            self.state.bundle_output_folder, self.state.cache_worker_filename
         )
         with open(filename, "w") as f:
             f.write(out)
