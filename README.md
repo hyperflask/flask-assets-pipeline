@@ -443,10 +443,11 @@ You can provide a nonce like so: `{% asset_tags(nonce="...") %}
 | --- | --- | --- | --- |
 | ASSETS_IMAGES_FOLDER | images_folder | Folder relative to static dir when a separate assets folder is not used |
 | ASSETS_IMAGES_OUTPUT_FOLDER | images_output_folder | Folder relative to static dir where processed images are saved | dist/img
-| ASSETS_RESIZE_IMAGES | resize_images | True for default set of sizes or a list of width in pixels | False
-| ASSETS_OPTIMIZE_IMAGES | optimize_images | Whether to optimize all images | False
-| ASSETS_WEBP_IMAGES | webp_images | Whether to convert images to Webp | False
-| ASSETS_IMAGE_PLACEHOLDER | image_placeholder | Compute a placeholder data URI for images | True
+| ASSETS_IMAGES_SIZES | images_sizes | True for default set of sizes or a list of width in pixels | False
+| ASSETS_IMAGES_DEFAULT_SIZE | images_default_size | Default size out of resized images to use | 
+| ASSETS_IMAGES_OPTIMIZE | images_optimize | Whether to optimize all images | False
+| ASSETS_IMAGES_WEBP | images_webp | Whether to convert images to Webp | False
+| ASSETS_IMAGES_PLACEHOLDER | images_placeholder | Compute a placeholder data URI for images | True
 
 ### Node packages
 

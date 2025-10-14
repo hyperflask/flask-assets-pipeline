@@ -35,23 +35,31 @@ class ImageMeta(BaseImageProcessor):
 
 class ImageConverter(BaseImageProcessor):
     def __init__(self, target_ext, **save_kwargs):
+        self.target_ext = f".{target_ext}"
+        self.save_kwargs = save_kwargs
+
+    def process(self, img, filename, meta):
+        if filename.endswith(self.target_ext):
+            return
+        filename = _rewrite_filename(filename, self.target_ext)
+        return self.save(img, filename, **self.save_kwargs)
+
+
+class ImageOptimizer(BaseImageProcessor):
+    def __init__(self, target_ext=None, **save_kwargs):
         self.target_ext = f".{target_ext}" if target_ext else None
         self.save_kwargs = save_kwargs
+        self.save_kwargs.setdefault("optimize", True)
 
     def process(self, img, filename, meta):
         filename = _rewrite_filename(filename, self.target_ext)
         return self.save(img, filename, **self.save_kwargs)
-    
-
-class ImageOptimizer(ImageConverter):
-    def __init__(self, target_ext=None, **save_kwargs):
-        save_kwargs['optimize'] = True
-        super().__init__(target_ext, **save_kwargs)
 
 
 class ImageResizer(BaseImageProcessor):
-    def __init__(self, sizes=DEFAULT_IMAGE_SIZES, target_ext=None):
+    def __init__(self, sizes=DEFAULT_IMAGE_SIZES, default_size=None, target_ext=None):
         self.sizes = sizes
+        self.default_size = default_size
         self.target_ext = f".{target_ext}" if target_ext else None
 
     def process(self, img, filename, meta):
@@ -61,6 +69,8 @@ class ImageResizer(BaseImageProcessor):
             resized = img.copy()
             resized.thumbnail((size, img.height))
             meta.setdefault('sizes', {})[size] = self.save(resized, sizename, optimize=True)
+        if self.default_size:
+            return meta['sizes'][self.default_size]
 
 
 class ImagePlaceholder(BaseImageProcessor):

@@ -72,10 +72,11 @@ class AssetsPipelineState:
     images_folder: t.Optional[str]
     images_output_folder: str
     images_output_url: str
-    optimize_images: bool
-    resize_images: t.Optional[t.Sequence[int]]
-    webp_images: bool
-    image_placeholder: bool
+    images_optimize: bool
+    images_sizes: t.Optional[t.Sequence[int]]
+    images_default_size: t.Optional[int]
+    images_webp: bool
+    images_placeholder: bool
     mapping: t.Mapping[str, t.Sequence[str]]
     watch_template_folders: t.Sequence[str]
     builders: t.Sequence[t.Type[BuilderBase]]
@@ -155,10 +156,11 @@ class AssetsPipeline:
         cache_worker_register=None,
         images_folder=None,
         images_output_folder="dist/img",
-        optimize_images=False,
-        resize_images=None,
-        webp_images=False,
-        image_placeholder=True,
+        images_optimize=False,
+        images_sizes=None,
+        images_default_size=None,
+        images_webp=False,
+        images_placeholder=True,
         with_jinja_ext=True,
         jinja_defer_asset_tags=True,
         debug_static_assets_url="/static/_assets",
@@ -174,9 +176,9 @@ class AssetsPipeline:
         cdn_enabled = app.config.get("ASSETS_CDN_ENABLED", cdn_enabled)
         images_folder = app.config.get("ASSETS_IMAGES_FOLDER", images_folder)
         images_output_folder = app.config.get("ASSETS_OUTPUT_FOLDER", images_output_folder)
-        resize_images = app.config.get("ASSETS_RESIZE_IMAGES", resize_images)
-        if resize_images is True:
-            resize_images = DEFAULT_IMAGE_SIZES
+        images_sizes = app.config.get("ASSETS_IMAGES_SIZES", images_sizes)
+        if images_sizes is True:
+            images_sizes = DEFAULT_IMAGE_SIZES
 
         self.app = app
         state = self.state = AssetsPipelineState(
@@ -222,10 +224,11 @@ class AssetsPipeline:
             images_folder=os.path.join(app.root_path, images_folder) if images_folder else None,
             images_output_folder=os.path.join(app.static_folder, images_output_folder) if images_output_folder else app.static_folder,
             images_output_url=f"{app.static_url_path}/{images_output_folder}" if images_output_folder else app.static_url_path,
-            optimize_images=app.config.get("ASSETS_OPTIMIZE_IMAGES", optimize_images),
-            resize_images=resize_images,
-            webp_images=app.config.get("ASSETS_WEBP_IMAGES", webp_images),
-            image_placeholder=app.config.get("ASSETS_IMAGE_PLACEHOLDER", image_placeholder),
+            images_optimize=app.config.get("ASSETS_IMAGES_OPTIMIZE", images_optimize),
+            images_sizes=app.config.get("ASSETS_IMAGES_SIZES", images_sizes),
+            images_default_size=app.config.get("ASSETS_IMAGES_DEFAULT_SIZE", images_default_size),
+            images_webp=app.config.get("ASSETS_IMAGES_WEBP", images_webp),
+            images_placeholder=app.config.get("ASSETS_IMAGES_PLACEHOLDER", images_placeholder),
             mapping={},
             watch_template_folders=[],
             builders=[],
@@ -272,14 +275,15 @@ class AssetsPipeline:
             state.assets_endpoint = "assets"
 
         self.image_processor = ImageProcessorChain([ImageMeta()])
-        if state.webp_images:
-            self.image_processor.processors.append(ImageConverter("webp"))
-        elif state.optimize_images:
-            self.image_processor.processors.append(ImageOptimizer())
-        if state.resize_images:
-            self.image_processor.processors.append(ImageResizer(state.resize_images, target_ext="webp"))
-        if state.image_placeholder:
+        if state.images_placeholder:
             self.image_processor.processors.append(ImagePlaceholder())
+        if state.images_webp:
+            self.image_processor.processors.append(ImageConverter("webp"))
+        elif state.images_optimize:
+            self.image_processor.processors.append(ImageOptimizer())
+        if state.images_sizes:
+            self.image_processor.processors.append(
+                ImageResizer(state.images_sizes, target_ext="webp"))
 
         self.static_assets_file_processor = ProcessorDispatcher()
         if PIL:
@@ -496,13 +500,13 @@ class AssetsPipeline:
                 if v and k not in ("modifier", "content_type")
             )
             if meta.get("modifier") == "prefetch":
-                pre.append('<link rel="prefetch" href="%s"%s>' % (url, attrs))
+                pre.append('<link rel="prefetch" href="%s">' % url)
             elif meta.get("modifier") == "preload":
                 pre.append(
-                    '<link rel="preload" href="%s" as="%s"%s>' % (url, meta["content_type"], attrs)
+                    '<link rel="preload" href="%s" as="%s">' % (url, meta["content_type"])
                 )
             elif meta.get("modifier") == "modulepreload":
-                pre.append('<link rel="modulepreload" href="%s"%s>' % (url, attrs))
+                pre.append('<link rel="modulepreload" href="%s">' % url)
             elif meta.get("modifier") == "import":
                 tags.append('<script src="%s" type="module"%s></script>' % (url, attrs))
             elif url.endswith(".css") or meta.get("content_type") == "style":
