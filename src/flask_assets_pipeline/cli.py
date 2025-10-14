@@ -30,6 +30,9 @@ def dev(watch_path, watch_app, livereload, build_only):
     if build_only:
         livereload = False
 
+    # reset mapping file
+    state.instance.write_mapping_file({}, merge=False)
+
     reloader = None
     if livereload:
         reloader = Reloader()
