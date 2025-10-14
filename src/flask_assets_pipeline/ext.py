@@ -30,7 +30,7 @@ except ImportError:
 
 @dataclass
 class AssetsPipelineState:
-    bundles: t.Mapping[str, t.Sequence[t.Union[str, "Entrypoint"]]]
+    bundles: t.Mapping[str, t.Sequence[t.Union[str, "BundleEntrypoint"]]]
     include: t.Sequence[t.Tuple[int, str]]
     route_template: str
     inline: bool
@@ -161,7 +161,8 @@ class AssetsPipeline:
         image_placeholder=True,
         with_jinja_ext=True,
         jinja_defer_asset_tags=True,
-        debug_static_assets_url="/static/_assets"
+        debug_static_assets_url="/static/_assets",
+        bundle_builder=EsbuildBuilder
     ):
         bundles = app.config.get("ASSETS_BUNDLES", bundles)
         include = app.config.get("ASSETS_INCLUDE", include)
@@ -244,6 +245,7 @@ class AssetsPipeline:
                 "No assets mapping found, please run 'flask assets build' to generate it"
             )
 
+        self.bundle_builder = bundle_builder
         if bundles:
             self.bundle(bundles, include=include is None)
         if include:
@@ -327,8 +329,8 @@ class AssetsPipeline:
         for name, files in bundles.items():
             self.state.bundles[name] = [
                 f
-                if isinstance(f, Entrypoint) or is_abs_url(f)
-                else Entrypoint.create(
+                if isinstance(f, BundleEntrypoint) or is_abs_url(f)
+                else BundleEntrypoint.create(
                     f,
                     from_package=from_package,
                     assets_folder=assets_folder,
@@ -355,7 +357,7 @@ class AssetsPipeline:
             files = [f for files in self.state.bundles.values() for f in files]
         if entrypoints_only:
             return [
-                f if isinstance(f, Entrypoint) else Entrypoint.create(f)
+                f if isinstance(f, BundleEntrypoint) else BundleEntrypoint.create(f)
                 for f in files
                 if not is_abs_url(f)
             ]
@@ -582,9 +584,10 @@ class AssetsPipeline:
             return self.builders
         builtins = [
             NodeDependenciesBuilder(),
-            TemplateBuilder(),
-            EsbuildBuilder(),
+            TemplateBuilder()
         ]
+        if self.bundle_builder:
+            builtins.append(self.bundle_builder)
         if self.state.tailwind:
             builtins.append(TailwindBuilder())
         if self.state.cache_worker:
@@ -655,7 +658,7 @@ class AssetsPipeline:
 
 
 @dataclass
-class Entrypoint:
+class BundleEntrypoint:
     filename: str
     outfile: t.Optional[str] = None
     from_package: t.Optional[str] = None

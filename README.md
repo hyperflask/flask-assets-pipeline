@@ -2,13 +2,15 @@
 
 Modern assets pipeline for Flask.
 
- - Asset bundling using [esbuild](https://esbuild.github.io/).
+ - Asset bundling using [esbuild](https://esbuild.github.io/)
  - Live reloading
  - Support for [tailwind](https://tailwindcss.com/) (v4)
  - Compatible with #nobuild leveraging [import maps](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script/type/importmap)
  - Extract inline scripts and styles from templates and bundle them properly
  - CDN support
  - Images optimization and resizing
+ - Preloading and prefetching support
+ - Generate a cache service worker
 
 ## Installation
 
@@ -341,6 +343,8 @@ Generate an image tag attributes using the metadata saved as part of the mapping
 assets = AssetsPipeline(app, ..., assets_folder="assets", webp_images=True, resize_images=[400])
 ```
 
+In your template:
+
 ```jinja
 <img {{asset_image_attrs('image.png')}}>
 ```
@@ -472,3 +476,11 @@ You can provide a nonce like so: `{% asset_tags(nonce="...") %}
 | assets init-tailwind | Create the tailwind config |
 | assets generate-esbuild-script | Generate a script to run esbuild allowing you to customize the build |
 | assets esbuild-script | Run the esbuild script |
+
+## Using another bundler
+
+Flask-Assets-Pipeline is built as a generic assets pipeline system with esbuild deeply integrated. Other bundlers could be used instead of esbuild.
+
+Create a new builder similar to [`EsbuildBuilder`](https://github.com/hyperflask/flask-assets-pipeline/blob/main/src/flask_assets_pipeline/builders/esbuild.py).
+
+Use your builder instead of esbuild: `AssetsPipeline(app, ..., bundle_builder=YourCustomBuilder())`
