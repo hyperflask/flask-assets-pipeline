@@ -56,26 +56,42 @@ class TemplateCompilerHandler(FileSystemEventHandler):
         self.broker = broker
 
     def on_modified(self, event):
-        if not event.is_directory and os.path.abspath(event.src_path).startswith(self.path):
-            tpl = os.path.relpath(event.src_path, self.path)
-            if (
-                os.path.splitext(tpl)[1].lower()
-                not in self.app.extensions["assets"].inline_template_exts
-            ):
-                return
+        if not event.is_directory:
+            self.compile(event.src_path)
+
+    def on_created(self, event):
+        if not event.is_directory:
+            self.compile(event.src_path)
+
+    def on_moved(self, event):
+        # editors doing atomic saves write a temp file then rename it
+        if not event.is_directory:
+            self.compile(event.dest_path)
+
+    def compile(self, path):
+        path = os.path.abspath(path)
+        if not path.startswith(self.path + os.sep):
+            return
+        tpl = os.path.relpath(path, self.path)
+        if (
+            os.path.splitext(tpl)[1].lower()
+            not in self.app.extensions["assets"].inline_template_exts
+        ):
+            return
+        env = self.app.jinja_env
+        with self.app.app_context():
             try:
-                with self.app.app_context():
-                    try:
-                        source = self.app.jinja_env.loader.get_source(self.app.jinja_env, tpl)[0]
-                        self.app.jinja_env.compile(
-                            source, tpl
-                        )  # force the compilation so the extension parse() method is executed
-                    except TemplateNotFound:
-                        # handle loaders that do weird stuff :)
-                        for template in self.app.jinja_loader.list_templates():
-                            if template.endswith(tpl):
-                                self.app.jinja_env.get_template(template)
-                if self.broker:
-                    self.broker.ping()
-            except:
-                raise
+                source = env.loader.get_source(env, tpl)[0]
+                env.compile(source, tpl)  # force the compilation so the extension parse() method is executed
+            except TemplateNotFound:
+                # the template may be registered under a prefixed name (eg: app/components/Foo.html)
+                tpl = tpl.replace(os.sep, "/")
+                for template in env.loader.list_templates():
+                    if template != tpl and not template.endswith("/" + tpl):
+                        continue
+                    source, filename, _ = env.loader.get_source(env, template)
+                    if filename and os.path.abspath(filename) != path:
+                        continue
+                    env.compile(source, template)
+        if self.broker:
+            self.broker.ping()
